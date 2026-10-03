@@ -55,6 +55,7 @@ window.MG_CONFIG = {
     { v: "Bebas", img: "venue-table", sub: "Mana saja" },
   ],
   footNote: "Prototipe untuk demo · belum terhubung ke sistem kasir Robucca.",
+  sigCat: "signature",                 // kategori yang dibuka tombol "Lihat menu" di bagian Signature
 };
 
 /* ---------- Grup opsi ---------- */

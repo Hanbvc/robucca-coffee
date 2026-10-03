@@ -508,7 +508,7 @@
       </div>
       <div class="dots" id="car-dots">${BANNERS.map((_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('')}</div>
 
-      <div class="sec-h"><h2>Signature</h2><a class="link" href="#/menu?cat=special-bev">Lihat menu ${icon('chevron-right', 'xs')}</a></div>
+      <div class="sec-h"><h2>Signature</h2><a class="link" href="#/menu${C.sigCat ? '?cat=' + C.sigCat : ''}">Lihat menu ${icon('chevron-right', 'xs')}</a></div>
       <div class="hscroll sig-list">
         ${sigs.map((it) => `<div class="sig" data-act="item" data-id="${it.id}" role="button" tabindex="0">
           ${pic(it.img, it.name)}<span class="tag dark star">★ Signature</span>
