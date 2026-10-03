@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Robucca — pesan & reservasi (prototipe)</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="description" content="Pesan dine in & take away, lihat menu lengkap, dan reservasi meja di Robucca Ijen Nirwana, Malang." />
+  <meta name="theme-color" content="#FAEEDA" />
+  <meta name="color-scheme" content="light" />
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Robucca" />
+  <meta property="og:title" content="Robucca — pesan & reservasi (prototipe)" />
+  <meta property="og:description" content="Pesan dine in & take away, dan reservasi meja di Robucca Ijen Nirwana, Malang." />
+  <meta property="og:image" content="assets/img/banner-essentials.jpg" />
+  <link rel="icon" type="image/png" href="assets/brand/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/brand/apple-touch-icon.png" />
+  <!-- Layar pembuka saat dibuka dari Home Screen iPhone -->
+  <link rel="apple-touch-startup-image" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="assets/splash/splash-1320x2868.png" />
+  <link rel="apple-touch-startup-image" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="assets/splash/splash-1290x2796.png" />
+  <link rel="apple-touch-startup-image" media="(device-width: 420px) and (device-height: 912px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="assets/splash/splash-1260x2736.png" />
+  <link rel="apple-touch-startup-image" media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="assets/splash/splash-1206x2622.png" />
+  <link rel="apple-touch-startup-image" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="assets/splash/splash-1179x2556.png" />
+  <link rel="apple-touch-startup-image" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="assets/splash/splash-1170x2532.png" />
+  <link rel="apple-touch-startup-image" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="assets/splash/splash-1284x2778.png" />
+  <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="assets/splash/splash-1125x2436.png" />
+  <link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="assets/splash/splash-1242x2688.png" />
+  <link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="assets/splash/splash-828x1792.png" />
+  <link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="assets/splash/splash-1242x2208.png" />
+  <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="assets/splash/splash-750x1334.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Londrina+Solid:wght@400;900&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- Panel samping (hanya tampil di layar lebar) -->
+  <aside class="desk" aria-hidden="true">
+    <img class="desk-logo" src="assets/brand/lockup-dark.png" alt="" />
+    <p class="desk-lead">Pesan dine in &amp; take away, lihat menu, dan reservasi meja — langsung dari ponsel.</p>
+    <p class="desk-note">Tampilan ini dirancang untuk handphone. Buka di ponsel untuk pengalaman terbaik.</p>
+    <p class="desk-note"><b>Prototipe untuk demo</b> — belum terhubung ke sistem kasir maupun pembayaran Robucca.</p>
+    <p class="desk-addr">Ijen Nirwana Residence Blok D No.1A, Malang<br />Setiap hari · 08.00 – 21.00</p>
+  </aside>
+
+  <div id="app" class="app">
+    <div id="splash" class="splash" aria-hidden="true">
+      <img src="assets/brand/wordmark-light.png" alt="" />
+    </div>
+
+    <main id="view" class="view" tabindex="-1"></main>
+
+    <div id="cartbar" class="cartbar" hidden></div>
+
+    <nav class="tabbar" aria-label="Navigasi utama">
+      <a href="#/" data-tab="home"><span class="ti" data-icon="home"></span><span>Beranda</span></a>
+      <a href="#/menu" data-tab="menu"><span class="ti" data-icon="coffee"></span><span>Menu</span></a>
+      <a href="#/reservasi" data-tab="reservasi"><span class="ti" data-icon="calendar"></span><span>Reservasi</span></a>
+      <a href="#/pesanan" data-tab="pesanan"><span class="ti" data-icon="receipt"></span><span>Pesanan</span><i class="tab-dot" hidden></i></a>
+      <a href="#/akun" data-tab="akun"><span class="ti" data-icon="user"></span><span>Akun</span></a>
+    </nav>
+
+    <div id="sheets"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </div>
+
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
