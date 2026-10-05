@@ -60,6 +60,16 @@ window.MG_CONFIG = {
   delivery: {
     maxKm: 15,
     areaHint: "Malang",                // ditambahkan ke pencarian alamat agar hasil di sekitar toko
+    // Contoh alamat & penerima untuk demo — dipakai selama pelanggan belum menyimpan alamat sendiri
+    sample: {
+      name: "Jl. Soekarno Hatta (Suhat)",
+      text: "Jl. Soekarno Hatta No. 27, Jatimulyo, Kec. Lowokwaru, Kota Malang, Jawa Timur 65142",
+      note: "Ruko lantai 2, samping minimarket",
+      lat: -7.9420837,
+      lng: 112.6220393,
+      recipient: "Dinda Ayu Lestari",
+      phone: "081200001234",           // nomor contoh, bukan nomor asli
+    },
     defaultKm: 3,                      // dipakai sebelum lokasi pelanggan terdeteksi
     roadFactor: 1.3,                   // jarak garis lurus → perkiraan jarak jalan
     couriers: [

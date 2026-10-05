@@ -51,6 +51,8 @@ Cara mengaktifkan saran alamat:
 
 ## Catatan
 
+- Untuk demo, pengunjung baru otomatis memakai alamat & penerima contoh di Jl. Soekarno Hatta (Suhat), Malang, dengan nomor WhatsApp contoh. Ubah atau hapus di `delivery.sample` pada `js/data.js`.
+
 - Ongkir delivery dihitung dari `delivery.couriers` (tarif dasar + per km, minimum, dibulatkan ke Rp500) dengan jangkauan maksimal `delivery.maxKm`. Ini estimasi; di versi final ongkir, pemesanan driver, dan pelacakan diambil dari API GoSend dan GrabExpress.
 
 - Pesanan dan reservasi tersimpan di perangkat masing-masing (localStorage); belum ada backend.

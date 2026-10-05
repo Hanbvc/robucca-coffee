@@ -270,10 +270,16 @@
     const hint = DLV.areaHint && !t.toLowerCase().includes(DLV.areaHint.toLowerCase()) ? `, ${DLV.areaHint}` : '';
     return mapEmbed(t + hint);
   }
+  function addrMapLink() {
+    const a = S.addr;
+    if (a.lat != null) return gmapsLink(a.lat, a.lng);
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${(a.text || '').trim()}${DLV.areaHint ? ', ' + DLV.areaHint : ''}`)}`;
+  }
   function showAddrMap() {
     const box = $('#addr-map'); if (!box) return;
     const src = addrMapSrc(); box.hidden = !src;
     const f = $('iframe', box); if (src && f.getAttribute('src') !== src) f.setAttribute('src', src);
+    const o = $('#map-open'); if (o) o.href = addrMapLink();
   }
   let gmapsP = null; let placesLib = null; let gmToken = null; let sugg = []; let addrT = null; let addrSeq = 0; let gmFail = false;
   const useGPlaces = () => !!C.googleMapsKey && !gmFail;
@@ -350,17 +356,18 @@
     const a = S.addr; const t = (a.text || '').trim();
     if (!hasAddr()) return { title: 'Pilih alamat pengiriman', sub: 'Cari lewat Google Maps atau pakai lokasimu' };
     const title = a.name || (t ? t.split(',')[0].trim() : 'Lokasi saat ini');
-    const sub = [t && t !== title ? t : t ? '' : 'Titik dari GPS perangkatmu', a.note].filter(Boolean).join(' · ');
+    const rest = t.startsWith(title) ? t.slice(title.length).replace(/^[\s,]+/, '') : t;
+    const sub = [rest || (t ? '' : 'Titik dari GPS perangkatmu'), a.note].filter(Boolean).join(' · ');
     return { title, sub: sub || t };
   }
-  function routeHTML(modeAct) {
+  function routeHTML(modeAct, compact) {
     const km = S.addr.km; const far = isFar(); const al = addrLines();
     const status = km == null
       ? (hasAddr() ? 'Jarak belum diketahui · pakai lokasimu' : 'Jarak dihitung setelah alamat dipilih')
       : `${kmLabel(km)} • <span class="${far ? 'bad' : 'ok'}">${far ? 'Diluar jangkauan' : 'Dalam jangkauan'}</span>`;
     return `<div class="card route">
         <button class="rt-row" data-act="store"><span class="rt-ic store">${icon('store')}</span><span class="grow"><b>${esc(C.storeName)} ${esc(C.branch)}</b><small>${status}</small></span>${icon('chevron-right', 'sm')}</button>
-        <button class="rt-row" data-act="addr"><span class="rt-ic pin">${icon('map-pin')}</span><span class="grow"><b>${esc(al.title)}</b><small class="clamp2">${esc(al.sub)}</small></span>${icon('chevron-right', 'sm')}</button>
+        <button class="rt-row" data-act="addr"><span class="rt-ic pin">${icon('map-pin')}</span><span class="grow"><b>${esc(al.title)}</b><small class="${compact ? 'clamp1' : 'clamp2'}">${esc(al.sub)}</small></span>${icon('chevron-right', 'sm')}</button>
       </div>
       ${far ? `<div class="oor">
         <h3>Di Luar Jangkauan Pengiriman</h3>
@@ -371,7 +378,7 @@
   function refreshRoute() {
     const slot = $('#route-slot'); if (!slot) return;
     const on = S.mode === 'delivery' && !activePreRsv();
-    slot.hidden = !on; slot.innerHTML = on ? routeHTML('mode') : '';
+    slot.hidden = !on; slot.innerHTML = on ? routeHTML('mode', true) : '';
   }
   let addrSaved = false;
   function openAddr() {
@@ -385,7 +392,7 @@
           <div class="addr-search">${icon('search', 'sm')}<input class="input" id="f-addr" data-bind="addr.text" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="words" placeholder="Cari alamat di Google Maps" value="${esc(S.addr.text)}" aria-label="Cari alamat di Google Maps"><span class="err-msg" hidden>Cari alamat atau pakai lokasimu dulu, ya.</span></div>
           <div class="sugg" id="addr-sugg" hidden></div>
           <button class="loc-btn" data-act="locate">${icon('locate', 'sm')}<span>Pakai lokasi saya saat ini</span></button>
-          <div class="addr-map" id="addr-map" ${addrMapSrc() ? '' : 'hidden'}><iframe src="${addrMapSrc()}" title="Peta alamat pengiriman" loading="lazy"></iframe></div>
+          <div class="addr-map" id="addr-map" ${addrMapSrc() ? '' : 'hidden'}><iframe src="${addrMapSrc()}" title="Peta alamat pengiriman" loading="lazy" tabindex="-1"></iframe><a class="map-open" id="map-open" href="${addrMapLink()}" target="_blank" rel="noopener">${icon('nav', 'xs')} Buka di Maps</a></div>
           <div class="addr-km" id="addr-km" ${km == null ? 'hidden' : ''}>${icon('map-pin', 'xs')}<span>${km == null ? '' : `±${kmLabel(km)} dari ${esc(C.storeName)} ${esc(C.branch)}`}</span></div>
           <label class="field" style="margin-top:12px"><span>Detail alamat <em>(opsional)</em></span><input class="input" data-bind="addr.note" placeholder="No. rumah, blok, atau patokan" value="${esc(S.addr.note)}"></label>
         </div>
@@ -396,11 +403,18 @@
     });
     $('[data-s="save"]', sh).addEventListener('click', () => {
       if (!hasAddr()) { const i = $('#f-addr', sh); i.classList.add('err'); i.nextElementSibling.hidden = false; return; }
-      addrSaved = true; save('addr');
+      addrSaved = true; save('addr'); vibrate();
       closeSheet(() => { rerender(); if (isFar()) toast(`Alamat di luar jangkauan (maks ${DLV.maxKm} km)`, 'info'); });
     });
     if (!S.addr.text) focusLater($('#f-addr', sh), prime, 380);
   }
+
+  // Contoh alamat & penerima (demo) selama pelanggan belum menyimpan alamat/profil sendiri
+  const SAMPLE = DLV.sample;
+  if (SAMPLE && !(S.addr.text || '').trim() && S.addr.lat == null) {
+    Object.assign(S.addr, { name: SAMPLE.name, text: SAMPLE.text, note: SAMPLE.note || '', lat: SAMPLE.lat, lng: SAMPLE.lng, km: distKm(SAMPLE.lat, SAMPLE.lng) });
+  }
+  if (SAMPLE && !(S.profile.name || '').trim() && !(S.profile.phone || '').trim()) S.profile = { name: SAMPLE.recipient, phone: SAMPLE.phone };
 
   // Data driver simulasi — di versi final datang dari API GoSend / GrabExpress
   const DRIVERS = [['Agus Setiawan', 'N 4821 ABK', 'Honda Vario'], ['Dimas Pratama', 'N 3317 AAF', 'Yamaha NMAX'], ['Rizky Ramadhan', 'N 5609 BCD', 'Honda Beat'], ['Fajar Nugroho', 'N 2148 AJ', 'Yamaha Mio'], ['Bagus Wicaksono', 'N 6732 BX', 'Honda Scoopy']];
@@ -670,7 +684,7 @@
         <span class="grow"><b>Pasang ${esc(C.storeName)} di iPhone</b><small>Ketuk ${icon('share')} lalu <b style="display:inline;font-size:12px">Tambah ke Layar Utama</b></small></span>
         <button class="icon-btn" data-act="ios-tip-off" aria-label="Tutup">${icon('x', 'sm')}</button>
       </div>` : ''}
-      ${live ? `<a class="live" href="#/order/${live.id}"><span class="lv-ico pulse">${icon('coffee')}</span><span class="grow"><b>${esc(stateText(live).title)}</b><small>${esc(live.code)} · ${KIND[live.mode] || 'Pesanan'}</small></span>${icon('chevron-right', 'sm')}</a>` : ''}
+      ${live ? `<a class="live" href="#/order/${live.id}"><span class="lv-ico pulse">${icon(live.mode === 'delivery' ? 'scooter' : 'coffee')}</span><span class="grow"><b>${esc(stateText(live).title)}</b><small>${esc(live.code)} · ${KIND[live.mode] || 'Pesanan'}</small></span>${icon('chevron-right', 'sm')}</a>` : ''}
       ${nextR ? `<a class="live" href="#/rsv/${nextR.id}"><span class="lv-ico" style="background:var(--sand);color:var(--ink)">${icon('calendar')}</span><span class="grow"><b>Reservasi ${esc(dateShort(nextR.date))}, ${dot(nextR.time)}</b><small>${nextR.guests} orang · ${esc(nextR.area)} · ${esc(nextR.code)}</small></span>${icon('chevron-right', 'sm')}</a>` : ''}
 
       <div class="sec-h"><h2>What's new</h2></div>
@@ -768,7 +782,7 @@
         </div>
       </div>
       <div class="menu-body">
-        <div id="route-slot" ${S.mode === 'delivery' && !activePreRsv() ? '' : 'hidden'}>${S.mode === 'delivery' && !activePreRsv() ? routeHTML('mode') : ''}</div>
+        <div id="route-slot" ${S.mode === 'delivery' && !activePreRsv() ? '' : 'hidden'}>${S.mode === 'delivery' && !activePreRsv() ? routeHTML('mode', true) : ''}</div>
         ${GROUPS.map((g) => `
           <div class="grp-h"><span>${esc(g.name)}</span></div>
           ${MENU.filter((c) => c.group === g.id).map((c) => `
@@ -1308,7 +1322,7 @@
       <div class="card receipt">
         <div class="rc-h"><b>Detail pesanan</b><span class="tag ${pu || dl ? 'olive' : ''}">${KIND[o.mode] || 'Pesanan'}</span></div>
         <div class="kv"><span>Waktu pesan</span><span>${esc(stampLabel(o.createdAt))}</span></div>
-        ${dl ? `<div class="kv"><span>Alamat</span><span>${esc(dl.addr)}${dl.lat != null ? `<br><a class="map-l" href="${gmapsLink(dl.lat, dl.lng)}" target="_blank" rel="noopener">Lihat di Google Maps</a>` : ''}</span></div>${dl.note ? `<div class="kv"><span>Detail</span><span>${esc(dl.note)}</span></div>` : ''}<div class="kv"><span>Kurir</span><span>${esc(dl.courierName)} · ±${kmLabel(dl.km)}</span></div>`
+        ${dl ? `<div class="kv kv-col"><span>Alamat</span><span>${esc(dl.addr)}${dl.lat != null ? `<br><a class="map-l" href="${gmapsLink(dl.lat, dl.lng)}" target="_blank" rel="noopener">Lihat di Google Maps</a>` : ''}</span></div>${dl.note ? `<div class="kv"><span>Detail</span><span>${esc(dl.note)}</span></div>` : ''}<div class="kv"><span>Kurir</span><span>${esc(dl.courierName)} · ±${kmLabel(dl.km)}</span></div>`
           : pu ? `<div class="kv"><span>Ambil</span><span>${esc(pickupLabel(o.pickup))}</span></div>${o.cutlery ? '<div class="kv"><span>Alat makan</span><span>Ya</span></div>' : ''}`
             : `<div class="kv"><span>${o.rsvCode ? 'Reservasi' : 'Meja'}</span><span>${o.rsvCode ? esc(o.rsvCode) : 'No. ' + esc(o.table)}</span></div>`}
         <div class="kv"><span>Nama</span><span>${esc(o.name)}</span></div>
@@ -1654,7 +1668,7 @@
     mode: (t) => { setMode(t.dataset.mode); refreshMenuHead(); refreshRoute(); updateCartBar(); vibrate(); },
     addr: () => openAddr(),
     'co-mode': (t) => { setMode(t.dataset.mode); rerender(); },
-    courier: (t) => { S.courier = t.dataset.v; save('courier'); rerender(); },
+    courier: (t) => { S.courier = t.dataset.v; save('courier'); vibrate(); rerender(); },
     locate: (t) => {
       const lbl = $('span', t);
       if (!navigator.geolocation) { toast('Lokasi tidak tersedia di perangkat ini', 'info'); return; }
@@ -1789,7 +1803,8 @@
     if (e.key === 'Escape' && sheetStack.length) closeSheet();
     if (e.key === 'Enter' && e.target.id === 'f-addr') { // tombol "Cari" di keyboard
       e.preventDefault(); clearTimeout(addrT);
-      if (useGPlaces()) { if (sugg.length) pickSugg(0); else fetchSugg(S.addr.text.trim()); } else { showAddrMap(); e.target.blur(); }
+      if (useGPlaces() && !sugg.length) fetchSugg(S.addr.text.trim()); else showAddrMap();
+      e.target.blur(); // tutup keyboard iPhone agar saran & peta terlihat
     }
   });
   // input binding (nilai form bertahan saat layar dirender ulang)
