@@ -734,8 +734,6 @@ html.kb .sheet-foot { padding-bottom: 12px; }
 /* ---------- Delivery (GoSend / GrabExpress) ---------- */
 .loc-btn { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; margin-top: 10px; padding: 8px 14px; border-radius: 14px; background: var(--olive-2); color: var(--olive); font-size: 13px; font-weight: 600; text-align: left; line-height: 1.3; transition: transform .15s var(--ease); }
 .loc-btn:active { transform: scale(.98); }
-.loc-btn.ok { background: var(--bg); color: var(--ink); }
-.loc-btn.ok .ico { color: var(--olive); }
 .pay .cf { font-size: 13.5px; font-weight: 600; white-space: nowrap; }
 .driver { display: flex; align-items: center; gap: 12px; margin: 12px 16px 0; padding: 14px; }
 .driver .dv-av { width: 46px; height: 46px; flex: none; border-radius: 15px; display: grid; place-items: center; background: var(--olive-2); color: var(--olive); font-weight: 700; font-size: 15px; }
@@ -743,3 +741,41 @@ html.kb .sheet-foot { padding-bottom: 12px; }
 .driver small { display: block; font-size: 12px; color: var(--ink-3); line-height: 1.4; }
 .driver .icon-btn { background: var(--bg); box-shadow: none; }
 .proto-note { margin: 8px 20px 0; font-size: 11.5px; line-height: 1.45; color: var(--ink-3); }
+.addr-search { position: relative; }
+.addr-search > .ico { position: absolute; left: 14px; top: 15px; color: var(--ink-3); pointer-events: none; }
+.addr-search .input { padding-left: 42px; }
+.addr-search .input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.sugg { margin-top: 6px; border-radius: 14px; background: var(--bg); overflow: hidden; }
+.sugg .sg { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 11px 14px; text-align: left; border-bottom: 1px solid var(--line); }
+.sugg .sg .ico { color: var(--ink-3); margin-top: 1px; }
+.sugg .sg b { display: block; font-size: 13.5px; font-weight: 600; line-height: 1.3; }
+.sugg .sg small { display: block; font-size: 12px; color: var(--ink-3); line-height: 1.35; }
+.sugg .sg:active { background: var(--bg-2); }
+.sugg .sg-by { padding: 7px 14px; font-size: 10.5px; color: var(--ink-3); text-align: right; }
+.addr-map { margin-top: 10px; height: 170px; border-radius: 14px; overflow: hidden; background: var(--sand); }
+.addr-map iframe { display: block; width: 100%; height: 100%; border: 0; }
+.addr-km { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12.5px; font-weight: 600; color: var(--olive); }
+.map-l { font-size: 12.5px; font-weight: 600; color: var(--olive); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ---------- Kartu rute delivery: toko → alamat (ala Fore) ---------- */
+.route { padding: 2px 16px; }
+#route-slot .route { margin-top: 14px; }
+.co-route { margin-top: 12px; }
+.co-route + .card { margin-top: 12px; }
+.rt-row { position: relative; display: flex; align-items: flex-start; gap: 14px; width: 100%; min-height: 72px; padding: 14px 0; text-align: left; color: var(--ink); }
+.rt-row > .ico:last-child { align-self: center; color: var(--ink-2); }
+.rt-row + .rt-row::before { content: ""; position: absolute; top: 0; left: 58px; right: 0; height: 1px; background: var(--line); }
+.rt-ic { position: relative; width: 44px; height: 44px; flex: none; border-radius: 50%; display: grid; place-items: center; }
+.rt-ic.store { background: var(--olive-2); color: var(--olive); }
+.rt-ic.pin { background: var(--danger-2); color: var(--danger); }
+.rt-row + .rt-row .rt-ic::before { content: ""; position: absolute; left: 50%; bottom: calc(100% + 3px); height: 22px; border-left: 2px dotted var(--ink-3); transform: translateX(-1px); }
+.rt-row b { display: block; font-size: 15px; font-weight: 600; line-height: 1.3; }
+.rt-row small { display: block; margin-top: 3px; font-size: 13px; color: var(--ink-2); line-height: 1.4; }
+.rt-row .ok { color: var(--olive); font-weight: 600; }
+.rt-row .bad { color: var(--danger); font-weight: 600; }
+.clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.oor { text-align: center; padding: 26px 6px 6px; }
+.oor h3 { margin: 0 0 8px; font-size: 18px; font-weight: 700; color: var(--ink); }
+.oor p { margin: 0 auto 18px; max-width: 330px; font-size: 13.5px; color: var(--ink-2); line-height: 1.5; }
+.oor-b { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.oor-b .btn { height: 50px; border-radius: 999px; }

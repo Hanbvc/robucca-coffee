@@ -11,7 +11,7 @@ Prototipe web app mobile untuk **Robucca Ijen Nirwana, Malang** (Rbc Group). Pel
 - **Menu lengkap:** 95 menu dalam 15 kategori (Ramen, Bento, Rice Bowl, Snack, Pastry, Dessert, Coffee, Milk, Tea, Soda, dan lainnya) dengan foto dari buku menu.
 - **Ukuran & penyajian:** minuman dingin punya pilihan Regular/Large. Menu yang tersedia panas dan dingin (Caffe Latte, Cappuccino, Americano, Mochaccino, Green Tea, Red Velvet) digabung jadi satu, dan fotonya ikut berganti saat memilih Hot.
 - **Pick Up:** pesan dan bayar dari ponsel, pilih jam ambil (secepatnya atau terjadwal), lalu ambil di counter pick-up tanpa antre dengan menyebut nama atau kode pesanan.
-- **Delivery:** isi alamat, hitung jarak dari lokasi pelanggan, pilih GoSend Instant atau GrabExpress Instant dengan estimasi ongkir dan waktu tiba, bayar online (termasuk ongkir), lalu pantau status sampai driver mengantar.
+- **Delivery:** kartu rute toko → alamat tujuan (jarak & status jangkauan, layar "Di Luar Jangkauan" bila lebih dari batas), cari alamat lewat Google Maps (saran alamat + peta) atau pakai lokasi pelanggan, pilih GoSend Instant atau GrabExpress Instant dengan estimasi ongkir dan waktu tiba, bayar online (termasuk ongkir), lalu pantau status sampai driver mengantar.
 - **Checkout:** QRIS, GoPay, OVO, DANA, ShopeePay, atau bayar di kasir (khusus Pick Up dan pre-order; Delivery wajib bayar online). Harga sesuai buku menu (tanpa tambahan pajak di aplikasi).
 - **Status pesanan, reservasi meja, pre-order, konfirmasi WhatsApp**, dan optimasi iPhone (PWA, safe area, keyboard, haptic, layar pembuka).
 
@@ -34,6 +34,20 @@ Semua data toko ada di `js/data.js`:
 | `MG_BANNERS` | Banner di beranda dan kategori yang dibuka |
 
 Kalau Robucca menambahkan pajak/servis di kasir, isi `taxRate` (misalnya `0.10`) dan `taxLabel` (misalnya `"PB1 10%"`); harga dan ringkasan pembayaran akan menyesuaikan.
+
+## Pencarian alamat Google Maps
+
+Kolom alamat delivery memakai Google Maps:
+
+- **Tanpa API key** (bawaan): alamat yang diketik ditampilkan di peta Google Maps. Jarak & ongkir dihitung dari tombol "Pakai lokasi saya" (atau estimasi bila belum ada).
+- **Dengan API key**: muncul daftar saran alamat dari Google Places; begitu dipilih, titik, jarak, dan ongkir dihitung otomatis.
+
+Cara mengaktifkan saran alamat:
+
+1. Di [Google Cloud Console](https://console.cloud.google.com/), buat project dan aktifkan billing.
+2. Aktifkan **Maps JavaScript API** dan **Places API (New)**.
+3. Buat API key, lalu batasi (*Application restrictions → Websites*) ke `https://hanbvc.github.io/*` dan `http://localhost:5174/*`, serta batasi API-nya ke dua API di atas.
+4. Isi key tersebut di `googleMapsKey` pada `js/data.js`.
 
 ## Catatan
 

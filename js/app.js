@@ -97,6 +97,7 @@
     rotate: '<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8M21 3v5h-5M21 12a9 9 0 0 1-15.5 6.2L3 16M3 21v-5h5"/>',
     phone2: '<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/>',
     sparkle: '<path d="M12 3 10.1 8.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>',
+    store: '<path d="M3.5 9.5 5 4h14l1.5 5.5"/><path d="M3.5 9.5a2.8 2.8 0 0 0 5.6 0 2.8 2.8 0 0 0 5.8 0 2.8 2.8 0 0 0 5.6 0"/><path d="M5 12.5V20h14v-7.5"/><path d="M10 20v-4.5h4V20"/>',
     scooter: '<circle cx="6" cy="18" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="M8.6 18h6.6l2.4-6"/><path d="M14.5 5.5h2.3l2.6 10"/><path d="M3.5 14.5h6.3l1.6 3.5"/><rect x="3.5" y="8" width="6" height="6.5" rx="1"/>',
     locate: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22"/>',
     share: '<path d="M12 3v13M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>',
@@ -215,7 +216,7 @@
     cart: store.get('cart', []).filter((l) => ITEMS[l.id]),
     mode: normMode(store.get('mode', 'pickup')),
     preRsv: store.get('preRsv', null),
-    addr: store.get('addr', { text: '', note: '', km: null }),
+    addr: { name: '', text: '', note: '', km: null, lat: null, lng: null, ...store.get('addr', {}) },
     courier: store.get('courier', 'gosend'),
     pickup: 'asap',
     cutlery: false,
@@ -256,6 +257,151 @@
     const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(C.lat)) * Math.cos(rad(lat)) * Math.sin(dLng / 2) ** 2;
     return Math.round(2 * R * Math.asin(Math.sqrt(a)) * DLV.roadFactor * 10) / 10;
   }
+  /* ---------- cari alamat lewat Google Maps ----------
+     Dengan C.googleMapsKey: saran alamat dari Google Places, titik & jarak (ongkir) otomatis.
+     Tanpa key: peta Google Maps menampilkan hasil pencarian alamat yang diketik. */
+  const gmapsLink = (lat, lng) => `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+  const mapEmbed = (q, z = 16) => `https://www.google.com/maps?q=${encodeURIComponent(q)}&z=${z}&output=embed`;
+  function addrMapSrc() {
+    const a = S.addr;
+    if (a.lat != null) return mapEmbed(`${a.lat},${a.lng}`, 17);
+    const t = (a.text || '').trim();
+    if (t.length < 6) return '';
+    const hint = DLV.areaHint && !t.toLowerCase().includes(DLV.areaHint.toLowerCase()) ? `, ${DLV.areaHint}` : '';
+    return mapEmbed(t + hint);
+  }
+  function showAddrMap() {
+    const box = $('#addr-map'); if (!box) return;
+    const src = addrMapSrc(); box.hidden = !src;
+    const f = $('iframe', box); if (src && f.getAttribute('src') !== src) f.setAttribute('src', src);
+  }
+  let gmapsP = null; let placesLib = null; let gmToken = null; let sugg = []; let addrT = null; let addrSeq = 0; let gmFail = false;
+  const useGPlaces = () => !!C.googleMapsKey && !gmFail;
+  function loadPlaces() {
+    if (placesLib) return Promise.resolve(placesLib);
+    if (!gmapsP) {
+      gmapsP = new Promise((res, rej) => {
+        if (window.google && google.maps && google.maps.importLibrary) { res(); return; } // Maps sudah dimuat
+        window.__gmReady = res;
+        window.gm_authFailure = () => { gmFail = true; sugg = []; renderSugg(); showAddrMap(); };
+        const sc = el('script');
+        sc.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(C.googleMapsKey)}&loading=async&callback=__gmReady&language=id&region=ID&v=weekly`;
+        sc.async = true; sc.onerror = () => rej(new Error('Google Maps gagal dimuat'));
+        document.head.appendChild(sc);
+      }).then(() => google.maps.importLibrary('places')).then((lib) => { placesLib = lib; return lib; });
+      gmapsP.catch(() => { gmapsP = null; });
+    }
+    return gmapsP;
+  }
+  const ftext = (x) => (x ? x.text || String(x) : '');
+  function renderSugg() {
+    const box = $('#addr-sugg'); if (!box) return;
+    box.hidden = !sugg.length;
+    box.innerHTML = sugg.length ? `${sugg.map((x, i) => `<button class="sg" data-act="addr-pick" data-i="${i}">${icon('map-pin', 'sm')}<span class="grow"><b>${esc(x.main)}</b>${x.sub ? `<small>${esc(x.sub)}</small>` : ''}</span></button>`).join('')}<div class="sg-by">Hasil dari Google Maps</div>` : '';
+  }
+  async function fetchSugg(q) {
+    const seq = ++addrSeq;
+    try {
+      const lib = await loadPlaces();
+      if (!gmToken) gmToken = new lib.AutocompleteSessionToken();
+      const { suggestions } = await lib.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+        input: q, sessionToken: gmToken, includedRegionCodes: ['id'], language: 'id', region: 'id',
+        locationBias: { center: { lat: C.lat, lng: C.lng }, radius: Math.min(50000, DLV.maxKm * 1000) },
+      });
+      if (seq !== addrSeq) return;
+      sugg = suggestions.filter((x) => x.placePrediction).slice(0, 5).map((x) => {
+        const pp = x.placePrediction;
+        return { p: pp, main: ftext(pp.mainText) || ftext(pp.text), sub: ftext(pp.secondaryText) };
+      });
+      renderSugg();
+    } catch (e) {
+      gmFail = true; sugg = []; renderSugg(); showAddrMap(); // jatuh ke mode peta tanpa key
+    }
+  }
+  function onAddrInput() {
+    clearTimeout(addrT);
+    const q = S.addr.text.trim();
+    S.addr.name = '';
+    if (useGPlaces()) {
+      S.addr.lat = null; S.addr.lng = null; // mencari alamat baru: titik lama tidak berlaku
+      if (q.length < 3) { addrSeq += 1; sugg = []; renderSugg(); return; }
+      addrT = setTimeout(() => fetchSugg(q), 250);
+    } else {
+      addrT = setTimeout(showAddrMap, 700);
+    }
+  }
+  async function pickSugg(i) {
+    const x = sugg[i]; if (!x) return;
+    try {
+      const place = x.p.toPlace();
+      await place.fetchFields({ fields: ['formattedAddress', 'location'] }); // hanya field SKU Essentials (kuota gratis 10.000/bulan)
+      const lat = place.location.lat(); const lng = place.location.lng(); const km = distKm(lat, lng);
+      Object.assign(S.addr, { name: x.main, text: place.formattedAddress || x.main, lat, lng, km });
+      gmToken = null; sugg = []; addrSaved = true; save('addr');
+      closeSheet(() => rerender());
+      toast(km > DLV.maxKm ? `±${kmLabel(km)} — di luar jangkauan pengantaran` : `Jarak ±${kmLabel(km)} dari ${C.storeName}`, 'map-pin');
+    } catch (e) { toast('Gagal mengambil titik dari Google Maps', 'info'); }
+  }
+
+  /* ---------- kartu rute ala Fore: toko → alamat tujuan ---------- */
+  const hasAddr = () => (S.addr.text || '').trim().length >= 8 || S.addr.lat != null;
+  const isFar = () => S.addr.km != null && S.addr.km > DLV.maxKm;
+  function addrLines() {
+    const a = S.addr; const t = (a.text || '').trim();
+    if (!hasAddr()) return { title: 'Pilih alamat pengiriman', sub: 'Cari lewat Google Maps atau pakai lokasimu' };
+    const title = a.name || (t ? t.split(',')[0].trim() : 'Lokasi saat ini');
+    const sub = [t && t !== title ? t : t ? '' : 'Titik dari GPS perangkatmu', a.note].filter(Boolean).join(' · ');
+    return { title, sub: sub || t };
+  }
+  function routeHTML(modeAct) {
+    const km = S.addr.km; const far = isFar(); const al = addrLines();
+    const status = km == null
+      ? (hasAddr() ? 'Jarak belum diketahui · pakai lokasimu' : 'Jarak dihitung setelah alamat dipilih')
+      : `${kmLabel(km)} • <span class="${far ? 'bad' : 'ok'}">${far ? 'Diluar jangkauan' : 'Dalam jangkauan'}</span>`;
+    return `<div class="card route">
+        <button class="rt-row" data-act="store"><span class="rt-ic store">${icon('store')}</span><span class="grow"><b>${esc(C.storeName)} ${esc(C.branch)}</b><small>${status}</small></span>${icon('chevron-right', 'sm')}</button>
+        <button class="rt-row" data-act="addr"><span class="rt-ic pin">${icon('map-pin')}</span><span class="grow"><b>${esc(al.title)}</b><small class="clamp2">${esc(al.sub)}</small></span>${icon('chevron-right', 'sm')}</button>
+      </div>
+      ${far ? `<div class="oor">
+        <h3>Di Luar Jangkauan Pengiriman</h3>
+        <p>Jarak pengiriman melebihi batas maksimal ${DLV.maxKm} km. Silakan ubah alamat atau pesan dengan layanan Pick Up.</p>
+        <div class="oor-b"><button class="btn ghost" data-act="${modeAct}" data-mode="pickup">Pick Up</button><button class="btn" data-act="addr">Ubah Alamat</button></div>
+      </div>` : ''}`;
+  }
+  function refreshRoute() {
+    const slot = $('#route-slot'); if (!slot) return;
+    const on = S.mode === 'delivery' && !activePreRsv();
+    slot.hidden = !on; slot.innerHTML = on ? routeHTML('mode') : '';
+  }
+  let addrSaved = false;
+  function openAddr() {
+    const snap = { ...S.addr }; addrSaved = false; sugg = [];
+    const prime = primeKeyboard();
+    const km = S.addr.km;
+    const sh = openSheet(`
+      <div class="sheet-body">
+        <div class="sheet-head"><h2>Alamat pengiriman</h2><p>Cari lewat Google Maps atau pakai lokasimu sekarang.</p></div>
+        <div class="sheet-pad bg-in">
+          <div class="addr-search">${icon('search', 'sm')}<input class="input" id="f-addr" data-bind="addr.text" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="words" placeholder="Cari alamat di Google Maps" value="${esc(S.addr.text)}" aria-label="Cari alamat di Google Maps"><span class="err-msg" hidden>Cari alamat atau pakai lokasimu dulu, ya.</span></div>
+          <div class="sugg" id="addr-sugg" hidden></div>
+          <button class="loc-btn" data-act="locate">${icon('locate', 'sm')}<span>Pakai lokasi saya saat ini</span></button>
+          <div class="addr-map" id="addr-map" ${addrMapSrc() ? '' : 'hidden'}><iframe src="${addrMapSrc()}" title="Peta alamat pengiriman" loading="lazy"></iframe></div>
+          <div class="addr-km" id="addr-km" ${km == null ? 'hidden' : ''}>${icon('map-pin', 'xs')}<span>${km == null ? '' : `±${kmLabel(km)} dari ${esc(C.storeName)} ${esc(C.branch)}`}</span></div>
+          <label class="field" style="margin-top:12px"><span>Detail alamat <em>(opsional)</em></span><input class="input" data-bind="addr.note" placeholder="No. rumah, blok, atau patokan" value="${esc(S.addr.note)}"></label>
+        </div>
+      </div>
+      <div class="sheet-foot"><button class="btn block" data-s="save">Simpan alamat</button></div>`, {
+      full: true,
+      onClose: () => { if (!addrSaved) { Object.assign(S.addr, snap); save('addr'); } sugg = []; },
+    });
+    $('[data-s="save"]', sh).addEventListener('click', () => {
+      if (!hasAddr()) { const i = $('#f-addr', sh); i.classList.add('err'); i.nextElementSibling.hidden = false; return; }
+      addrSaved = true; save('addr');
+      closeSheet(() => { rerender(); if (isFar()) toast(`Alamat di luar jangkauan (maks ${DLV.maxKm} km)`, 'info'); });
+    });
+    if (!S.addr.text) focusLater($('#f-addr', sh), prime, 380);
+  }
+
   // Data driver simulasi — di versi final datang dari API GoSend / GrabExpress
   const DRIVERS = [['Agus Setiawan', 'N 4821 ABK', 'Honda Vario'], ['Dimas Pratama', 'N 3317 AAF', 'Yamaha NMAX'], ['Rizky Ramadhan', 'N 5609 BCD', 'Honda Beat'], ['Fajar Nugroho', 'N 2148 AJ', 'Yamaha Mio'], ['Bagus Wicaksono', 'N 6732 BX', 'Honda Scoopy']];
   const pickDriver = () => { const [name, plate, bike] = DRIVERS[Math.floor(Math.random() * DRIVERS.length)]; return { name, plate, bike }; };
@@ -602,7 +748,7 @@
     const r = activePreRsv();
     if (r) return `${icon('calendar', 'xs')}<span>Pre-order reservasi <b>${esc(dateShort(r.date))}, ${dot(r.time)}</b></span><button class="edit" data-act="cancel-pre">Batal</button>`;
     if (S.mode === 'delivery') {
-      return `${icon('scooter', 'xs')}<span>Diantar <b>GoSend / GrabExpress</b>${S.addr.text.trim() ? ` ke <b>${esc(shortAddr(S.addr.text))}</b>` : ' ke alamatmu'}</span>`;
+      return `${icon('scooter', 'xs')}<span>Diantar <b>GoSend / GrabExpress</b> · maks. ${DLV.maxKm} km</span>`;
     }
     return `${icon('bag', 'xs')}<span>Ambil di <b>${esc(C.storeName)} ${esc(C.branch)}</b>, tanpa antre</span>`;
   }
@@ -622,6 +768,7 @@
         </div>
       </div>
       <div class="menu-body">
+        <div id="route-slot" ${S.mode === 'delivery' && !activePreRsv() ? '' : 'hidden'}>${S.mode === 'delivery' && !activePreRsv() ? routeHTML('mode') : ''}</div>
         ${GROUPS.map((g) => `
           <div class="grp-h"><span>${esc(g.name)}</span></div>
           ${MENU.filter((c) => c.group === g.id).map((c) => `
@@ -877,11 +1024,11 @@
       if (dlv && S.pay === 'cashier') S.pay = 'qris';
       const pays = dlv ? PAYS.filter((m) => m.id !== 'cashier') : PAYS;
       const km = dlvKm(); const cr = courierOf(S.courier); const fee = dlv ? dlvFee(cr, km) : 0;
-      const far = dlv && km > DLV.maxKm;
+      const far = dlv && isFar();
       const open = isOpen();
       const p = S.profile;
       const closedNote = { pickup: 'Pilih jadwal ambil di bawah.', delivery: 'Pesanan delivery dikirim begitu kami buka.', preorder: 'Pre-order disiapkan menjelang jam reservasi.' }[kind];
-      let typeBody;
+      let typeBody; let afterType = '';
       if (pre) {
         typeBody = `
             <div class="switch-row" style="border:0;margin-top:0;padding:0">
@@ -890,17 +1037,14 @@
               <button class="btn sm soft" data-act="cancel-pre">Batal</button>
             </div>`;
       } else if (dlv) {
-        typeBody = `${segHTML('co-mode')}
-            <div class="slot-lbl" style="margin-top:16px">Alamat pengantaran</div>
-            <label class="field"><span class="sr">Alamat lengkap</span><textarea class="textarea" id="f-addr" data-bind="addr.text" autocomplete="street-address" placeholder="Nama jalan, nomor rumah, RT/RW, kelurahan">${esc(S.addr.text)}</textarea><span class="err-msg" hidden>Isi alamat lengkap, ya.</span></label>
-            <button class="loc-btn ${S.addr.km != null ? 'ok' : ''}" data-act="locate">${icon('locate', 'sm')}<span>${S.addr.km != null ? `Lokasi terdeteksi · ±${kmLabel(S.addr.km)} dari ${esc(C.storeName)}` : 'Pakai lokasi saya untuk hitung jarak'}</span></button>
-            <label class="field" style="margin-top:10px"><span class="sr">Patokan</span><input class="input" data-bind="addr.note" placeholder="Patokan untuk driver (opsional)" value="${esc(S.addr.note)}"></label>
-            <div class="slot-lbl" style="margin-top:16px">Kurir</div>
+        typeBody = segHTML('co-mode');
+        afterType = `<div class="co-route">${routeHTML('co-mode')}</div>
+        ${far ? '' : `<div class="card"><h3>${icon('scooter', 'sm')} Kurir</h3>
             ${DLV.couriers.map((c) => `<button class="pay ${S.courier === c.id ? 'on' : ''}" data-act="courier" data-v="${c.id}" role="radio" aria-checked="${S.courier === c.id}">
               <span class="pl" style="background:${c.bg};font-size:9.5px">${c.mark}</span>
               <span class="grow"><b>${c.name}</b><small>${c.by} · tiba ±${dlvEta(km)} menit</small></span><span class="cf">${rp(dlvFee(c, km))}</span><span class="mark"></span></button>`).join('')}
-            ${far ? `<div class="note-bar" style="margin:12px 0 0">${icon('info', 'sm')}<span>Lokasimu ±${kmLabel(km)} dari ${esc(C.storeName)}, di luar jangkauan pengantaran (maks ${DLV.maxKm} km). Coba Pick Up, ya.</span></div>`
-              : `<div class="note-bar olive" style="margin:12px 0 0">${icon('info', 'sm')}<span>Driver ${esc(cr.by)} dipesan otomatis begitu pesananmu siap. ${S.addr.km == null ? `Sebelum lokasimu terdeteksi, ongkir dihitung untuk ±${kmLabel(DLV.defaultKm)}.` : 'Ongkir mengikuti tarif kurir saat pesanan dibuat.'}</span></div>`}`;
+            <div class="note-bar olive" style="margin:12px 0 0">${icon('info', 'sm')}<span>Driver ${esc(cr.by)} dipesan otomatis begitu pesananmu siap. ${S.addr.km == null ? `Pilih alamat dari Google Maps atau pakai lokasimu agar ongkir sesuai jarak (sementara dihitung ±${kmLabel(DLV.defaultKm)}).` : 'Ongkir mengikuti tarif kurir saat pesanan dibuat.'}</span></div>
+          </div>`}`;
       } else {
         typeBody = `${segHTML('co-mode')}
             <div class="slot-lbl" style="margin-top:16px">Waktu ambil di counter pick-up</div>
@@ -911,8 +1055,9 @@
       return `${back}
       <div class="co">
         ${!open ? `<div class="note-bar">${icon('clock', 'sm')}<span>Kami sedang tutup (buka ${dot(C.open)}–${dot(C.close)} WIB). ${closedNote}</span></div>` : ''}
-        <div class="card ${dlv ? 'bg-in' : ''}">${typeBody}
+        <div class="card">${typeBody}
         </div>
+        ${afterType}
 
         <div class="card bg-in">
           <h3>${icon('user', 'sm')} ${dlv ? 'Data penerima' : 'Data pemesan'}</h3>
@@ -963,15 +1108,12 @@
     const kind = pre ? 'preorder' : S.mode;
     const p = S.profile;
     const errs = [];
-    if (kind === 'delivery') {
-      const a = $('#f-addr');
-      if ((S.addr.text || '').trim().length < 8) { a.classList.add('err'); a.nextElementSibling.hidden = false; errs.push(a); }
-    }
+    if (kind === 'delivery' && !hasAddr()) { toast('Pilih alamat pengiriman dulu', 'map-pin'); openAddr(); return; }
     const nm = $('#f-name'); const ph = $('#f-phone');
     if ((p.name || '').trim().length < 2) { nm.classList.add('err'); nm.nextElementSibling.hidden = false; errs.push(nm); }
     if ((kind !== 'preorder' || p.phone) && !okPhone(p.phone)) { ph.classList.add('err'); ph.nextElementSibling.hidden = false; errs.push(ph); }
     if (errs.length) { errs[0].scrollIntoView({ behavior: 'smooth', block: 'center' }); toast('Lengkapi data dulu, ya', 'info'); return; }
-    if (kind === 'delivery' && dlvKm() > DLV.maxKm) { toast(`Di luar jangkauan pengantaran (maks ${DLV.maxKm} km)`, 'info'); return; }
+    if (kind === 'delivery' && isFar()) { toast(`Di luar jangkauan pengantaran (maks ${DLV.maxKm} km)`, 'info'); return; }
     save('profile', 'addr');
 
     const t = totals(S.cart);
@@ -989,7 +1131,7 @@
         ? rsvEpoch({ date: ymd(addDays(jkt(), S.pickup.startsWith('B|') ? 1 : 0)), time: S.pickup.replace('B|', '') }) : null,
       pickup: kind === 'pickup' ? S.pickup : null, cutlery: kind === 'pickup' ? S.cutlery : false,
       dlv: kind === 'delivery' ? {
-        addr: S.addr.text.trim(), note: (S.addr.note || '').trim(), km, located: S.addr.km != null,
+        addr: S.addr.text.trim() || addrLines().title, note: (S.addr.note || '').trim(), km, located: S.addr.km != null, lat: S.addr.lat, lng: S.addr.lng,
         courier: cr.id, courierName: cr.name, by: cr.by, fee, eta: dlvEta(km), driver: pickDriver(),
       } : null,
       name: p.name.trim(), phone: p.phone.trim(), pay: kind === 'delivery' && S.pay === 'cashier' ? 'qris' : S.pay, paid: false, paidAt: null, doneAt: null,
@@ -1125,7 +1267,7 @@
       `*${o.code}* (antrean ${o.queue})`,
       `Tipe: ${type}`,
       `Nama: ${o.name}${o.phone ? ' · ' + o.phone : ''}`,
-      ...(dl ? [`Alamat: ${dl.addr}${dl.note ? ' (' + dl.note + ')' : ''}`] : []), '',
+      ...(dl ? [`Alamat: ${dl.addr}${dl.note ? ' (' + dl.note + ')' : ''}`, ...(dl.lat != null ? [`Peta: ${gmapsLink(dl.lat, dl.lng)}`] : [])] : []), '',
       ...o.lines.map((l) => `${l.qty}x ${l.name}${l.sum ? ' (' + l.sum + ')' : ''}${l.note ? ' — "' + l.note + '"' : ''}`), '',
       ...(dl ? [`Subtotal: ${rp(o.sub)}`, `Ongkir: ${rp(dl.fee)}`] : []),
       `Total: ${rp(o.total)}`,
@@ -1166,7 +1308,7 @@
       <div class="card receipt">
         <div class="rc-h"><b>Detail pesanan</b><span class="tag ${pu || dl ? 'olive' : ''}">${KIND[o.mode] || 'Pesanan'}</span></div>
         <div class="kv"><span>Waktu pesan</span><span>${esc(stampLabel(o.createdAt))}</span></div>
-        ${dl ? `<div class="kv"><span>Alamat</span><span>${esc(dl.addr)}</span></div>${dl.note ? `<div class="kv"><span>Patokan</span><span>${esc(dl.note)}</span></div>` : ''}<div class="kv"><span>Kurir</span><span>${esc(dl.courierName)} · ±${kmLabel(dl.km)}</span></div>`
+        ${dl ? `<div class="kv"><span>Alamat</span><span>${esc(dl.addr)}${dl.lat != null ? `<br><a class="map-l" href="${gmapsLink(dl.lat, dl.lng)}" target="_blank" rel="noopener">Lihat di Google Maps</a>` : ''}</span></div>${dl.note ? `<div class="kv"><span>Detail</span><span>${esc(dl.note)}</span></div>` : ''}<div class="kv"><span>Kurir</span><span>${esc(dl.courierName)} · ±${kmLabel(dl.km)}</span></div>`
           : pu ? `<div class="kv"><span>Ambil</span><span>${esc(pickupLabel(o.pickup))}</span></div>${o.cutlery ? '<div class="kv"><span>Alat makan</span><span>Ya</span></div>' : ''}`
             : `<div class="kv"><span>${o.rsvCode ? 'Reservasi' : 'Meja'}</span><span>${o.rsvCode ? esc(o.rsvCode) : 'No. ' + esc(o.table)}</span></div>`}
         <div class="kv"><span>Nama</span><span>${esc(o.name)}</span></div>
@@ -1509,7 +1651,8 @@
     checkout: () => go('/checkout'),
     back: (t) => { if (navDepth > 0) history.back(); else go(t.dataset.to || '/'); },
     start: (t) => { S.mode = normMode(t.dataset.mode); S.preRsv = null; save('mode', 'preRsv'); go('/menu'); },
-    mode: (t) => { setMode(t.dataset.mode); refreshMenuHead(); updateCartBar(); vibrate(); },
+    mode: (t) => { setMode(t.dataset.mode); refreshMenuHead(); refreshRoute(); updateCartBar(); vibrate(); },
+    addr: () => openAddr(),
     'co-mode': (t) => { setMode(t.dataset.mode); rerender(); },
     courier: (t) => { S.courier = t.dataset.v; save('courier'); rerender(); },
     locate: (t) => {
@@ -1517,15 +1660,20 @@
       if (!navigator.geolocation) { toast('Lokasi tidak tersedia di perangkat ini', 'info'); return; }
       if (lbl) lbl.textContent = 'Mencari lokasimu…';
       navigator.geolocation.getCurrentPosition((pos) => {
-        const km = distKm(pos.coords.latitude, pos.coords.longitude);
-        S.addr.km = km; save('addr');
-        if (parseHash().path === '/checkout') rerender();
+        const lat = pos.coords.latitude; const lng = pos.coords.longitude; const km = distKm(lat, lng);
+        Object.assign(S.addr, { lat, lng, km }); if (!S.addr.text) S.addr.name = 'Lokasi saat ini';
+        if ($('#addr-map')) { // sheet alamat terbuka
+          showAddrMap();
+          const k = $('#addr-km'); if (k) { k.hidden = false; $('span', k).textContent = `±${kmLabel(km)} dari ${C.storeName} ${C.branch}`; }
+          const i = $('#f-addr'); if (i) { i.classList.remove('err'); i.nextElementSibling.hidden = true; }
+        } else { save('addr'); rerender(); }
         toast(km > DLV.maxKm ? `±${kmLabel(km)} — di luar jangkauan pengantaran` : `Jarak ±${kmLabel(km)} dari ${C.storeName}`, 'map-pin');
       }, () => {
-        if (lbl) lbl.textContent = 'Pakai lokasi saya untuk hitung jarak';
+        if (lbl) lbl.textContent = 'Pakai lokasi saya saat ini';
         toast('Lokasi tidak diizinkan, ongkir memakai estimasi', 'info');
       }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
     },
+    'addr-pick': (t) => pickSugg(Number(t.dataset.i)),
     driver: (t) => toast(`Simulasi: di versi final membuka chat driver di aplikasi ${t.dataset.by}`, 'chat'),
     cat: (t) => menuCtl && menuCtl.scrollTo(t.dataset.cat),
     quick: (t) => {
@@ -1639,6 +1787,10 @@
   document.addEventListener('keydown', (e) => {
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"][data-act]')) { e.preventDefault(); e.target.click(); }
     if (e.key === 'Escape' && sheetStack.length) closeSheet();
+    if (e.key === 'Enter' && e.target.id === 'f-addr') { // tombol "Cari" di keyboard
+      e.preventDefault(); clearTimeout(addrT);
+      if (useGPlaces()) { if (sugg.length) pickSugg(0); else fetchSugg(S.addr.text.trim()); } else { showAddrMap(); e.target.blur(); }
+    }
   });
   // input binding (nilai form bertahan saat layar dirender ulang)
   let bindT;
@@ -1648,7 +1800,7 @@
     e.target.classList.remove('err');
     const msg = e.target.parentElement.querySelector('.err-msg'); if (msg) msg.hidden = true;
     if (b === 'name' || b === 'phone') S.profile[b] = v;
-    else if (b === 'addr.text') S.addr.text = v;
+    else if (b === 'addr.text') { S.addr.text = v; onAddrInput(); }
     else if (b === 'addr.note') S.addr.note = v;
     else if (b === 'rd.note') draft().note = v;
     clearTimeout(bindT); bindT = setTimeout(() => save('profile', 'addr', 'rd'), 300);

@@ -15,7 +15,7 @@ window.MG_CONFIG = {
   instagram: "https://www.instagram.com/robucca.id/",
   tiktok: "",                          // kosong = baris TikTok disembunyikan
   handle: "@robucca.id",
-  mapsUrl: "https://maps.app.goo.gl/o7jJLn7jHP1qcneJ7",
+  mapsUrl: "https://maps.app.goo.gl/VVmXQxPFpWckyanY7",   // titik toko: asal pengiriman delivery
   lat: -7.979489,
   lng: 112.6174187,
   appleMapsQuery: "Robucca Ijen Malang",
@@ -59,6 +59,7 @@ window.MG_CONFIG = {
      Ongkir = maks(min, base + perKm × jarak), dibulatkan ke Rp500 — estimasi; tarif final dari API kurir. */
   delivery: {
     maxKm: 15,
+    areaHint: "Malang",                // ditambahkan ke pencarian alamat agar hasil di sekitar toko
     defaultKm: 3,                      // dipakai sebelum lokasi pelanggan terdeteksi
     roadFactor: 1.3,                   // jarak garis lurus → perkiraan jarak jalan
     couriers: [
@@ -66,6 +67,10 @@ window.MG_CONFIG = {
       { id: "grab", name: "GrabExpress Instant", by: "Grab", mark: "Grab", bg: "#00B14F", base: 4000, perKm: 2700, min: 11500 },
     ],
   },
+  /* Google Maps API key (Maps JavaScript API + Places API (New)) untuk saran alamat & ongkir otomatis.
+     Kosong = kolom alamat tetap mencari lewat peta Google Maps, tanpa daftar saran.
+     Batasi key ke domain situs (HTTP referrer), mis. https://hanbvc.github.io/* dan http://localhost:5174/*. */
+  googleMapsKey: "AIzaSyDvD20XVSsglIhWY24PgQ7VUquGabmgn_E",
   sigCat: "signature",                 // kategori yang dibuka tombol "Lihat menu" di bagian Signature
 };
 
