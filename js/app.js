@@ -21,7 +21,6 @@
   const IMG = (id) => `assets/img/${id}.jpg`;
   const rp = (n) => 'Rp' + String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
-  const digits = (s) => String(s || '').replace(/\D/g, '');
   const rand4 = () => String(Math.floor(1000 + Math.random() * 9000));
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   /* ---------- platform (iPhone) ---------- */
@@ -98,6 +97,8 @@
     rotate: '<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8M21 3v5h-5M21 12a9 9 0 0 1-15.5 6.2L3 16M3 21v-5h5"/>',
     phone2: '<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/>',
     sparkle: '<path d="M12 3 10.1 8.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>',
+    scooter: '<circle cx="6" cy="18" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="M8.6 18h6.6l2.4-6"/><path d="M14.5 5.5h2.3l2.6 10"/><path d="M3.5 14.5h6.3l1.6 3.5"/><rect x="3.5" y="8" width="6" height="6.5" rx="1"/>',
+    locate: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22"/>',
     share: '<path d="M12 3v13M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>',
   };
   const icon = (n, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
@@ -208,11 +209,14 @@
   }
 
   /* ---------- state ---------- */
+  // Tipe pesanan: 'pickup' (pesan & ambil tanpa antre) atau 'delivery' (diantar GoSend / GrabExpress)
+  const normMode = (m) => (m === 'delivery' ? 'delivery' : 'pickup');
   const S = {
     cart: store.get('cart', []).filter((l) => ITEMS[l.id]),
-    mode: store.get('mode', 'dinein'),
-    table: store.get('table', ''),
+    mode: normMode(store.get('mode', 'pickup')),
     preRsv: store.get('preRsv', null),
+    addr: store.get('addr', { text: '', note: '', km: null }),
+    courier: store.get('courier', 'gosend'),
     pickup: 'asap',
     cutlery: false,
     pay: store.get('pay', 'qris'),
@@ -233,6 +237,28 @@
   }
   const getRsv = (id) => S.rsvs.find((r) => r.id === id);
   const activePreRsv = () => { const r = S.preRsv && getRsv(S.preRsv); return r && r.status !== 'cancelled' ? r : null; };
+
+  /* ---------- pick up & delivery ---------- */
+  const DLV = C.delivery;
+  const courierOf = (id) => DLV.couriers.find((c) => c.id === id) || DLV.couriers[0];
+  // label & ikon per tipe pesanan (dinein/takeaway = data lama di perangkat)
+  const KIND = { pickup: 'Pick Up', takeaway: 'Pick Up', delivery: 'Delivery', preorder: 'Pre-order', dinein: 'Dine In' };
+  const KIND_ICON = { pickup: 'bag', takeaway: 'bag', delivery: 'scooter', preorder: 'calendar', dinein: 'utensils' };
+  const isPickup = (o) => o.mode === 'pickup' || o.mode === 'takeaway';
+  const kmLabel = (km) => `${km.toLocaleString('id-ID', { maximumFractionDigits: 1 })} km`;
+  const dlvKm = () => (S.addr.km != null ? S.addr.km : DLV.defaultKm);
+  const dlvFee = (c, km) => Math.ceil(Math.max(c.min, c.base + c.perKm * km) / 500) * 500;
+  const dlvEta = (km) => C.prepMinutes + 10 + Math.ceil(km * 3);
+  const shortAddr = (a) => { const t = String(a || '').split(',')[0].trim(); return t.length > 30 ? t.slice(0, 29) + '…' : t; };
+  function distKm(lat, lng) { // jarak garis lurus × faktor jalan
+    const R = 6371; const rad = (x) => (x * Math.PI) / 180;
+    const dLat = rad(lat - C.lat); const dLng = rad(lng - C.lng);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(C.lat)) * Math.cos(rad(lat)) * Math.sin(dLng / 2) ** 2;
+    return Math.round(2 * R * Math.asin(Math.sqrt(a)) * DLV.roadFactor * 10) / 10;
+  }
+  // Data driver simulasi — di versi final datang dari API GoSend / GrabExpress
+  const DRIVERS = [['Agus Setiawan', 'N 4821 ABK', 'Honda Vario'], ['Dimas Pratama', 'N 3317 AAF', 'Yamaha NMAX'], ['Rizky Ramadhan', 'N 5609 BCD', 'Honda Beat'], ['Fajar Nugroho', 'N 2148 AJ', 'Yamaha Mio'], ['Bagus Wicaksono', 'N 6732 BX', 'Honda Scoopy']];
+  const pickDriver = () => { const [name, plate, bike] = DRIVERS[Math.floor(Math.random() * DRIVERS.length)]; return { name, plate, bike }; };
 
   /* ---------- UI atoms ---------- */
   function pic(id, name = '', cls = '', big = false) {
@@ -435,10 +461,9 @@
 
   /* ---------- cart bar & tab dot ---------- */
   function ctxText() {
-    if (S.mode === 'takeaway') return 'Take Away';
     const r = activePreRsv();
     if (r) return `Pre-order · ${r.code}`;
-    return S.table ? `Dine In · Meja ${S.table}` : 'Dine In';
+    return S.mode === 'delivery' ? 'Delivery' : 'Pick Up';
   }
   function updateCartBar() {
     const bar = $('#cartbar');
@@ -488,8 +513,8 @@
           <span class="sc-in"><b class="sc-t">${esc(C.storeName)} ${esc(C.branch)}</b><span class="sc-a">${icon('map-pin', 'xs')} ${esc(C.addressShort)}</span></span>
         </button>
         <div class="modes">
-          <button class="mode" data-act="start" data-mode="dinein"><span class="mi">${icon('utensils')}</span><span><b>Dine In</b><small>Pesan dari meja</small></span></button>
-          <button class="mode" data-act="start" data-mode="takeaway"><span class="mi">${icon('bag')}</span><span><b>Take Away</b><small>Pesan dulu, ambil nanti</small></span></button>
+          <button class="mode" data-act="start" data-mode="pickup"><span class="mi">${icon('bag')}</span><span><b>Pick Up</b><small>Pesan &amp; ambil tanpa antre</small></span></button>
+          <button class="mode" data-act="start" data-mode="delivery"><span class="mi">${icon('scooter')}</span><span><b>Delivery</b><small>Garansi Tepat Waktu, dijamin</small></span></button>
           <a class="mode" href="#/reservasi"><span class="mi">${icon('calendar')}</span><span><b>Reservasi</b><small>Booking meja</small></span></a>
         </div>
       </div>
@@ -499,7 +524,7 @@
         <span class="grow"><b>Pasang ${esc(C.storeName)} di iPhone</b><small>Ketuk ${icon('share')} lalu <b style="display:inline;font-size:12px">Tambah ke Layar Utama</b></small></span>
         <button class="icon-btn" data-act="ios-tip-off" aria-label="Tutup">${icon('x', 'sm')}</button>
       </div>` : ''}
-      ${live ? `<a class="live" href="#/order/${live.id}"><span class="lv-ico pulse">${icon('coffee')}</span><span class="grow"><b>${esc(stateText(live).title)}</b><small>${esc(live.code)} · ${live.mode === 'dinein' ? 'Dine In' : 'Take Away'}</small></span>${icon('chevron-right', 'sm')}</a>` : ''}
+      ${live ? `<a class="live" href="#/order/${live.id}"><span class="lv-ico pulse">${icon('coffee')}</span><span class="grow"><b>${esc(stateText(live).title)}</b><small>${esc(live.code)} · ${KIND[live.mode] || 'Pesanan'}</small></span>${icon('chevron-right', 'sm')}</a>` : ''}
       ${nextR ? `<a class="live" href="#/rsv/${nextR.id}"><span class="lv-ico" style="background:var(--sand);color:var(--ink)">${icon('calendar')}</span><span class="grow"><b>Reservasi ${esc(dateShort(nextR.date))}, ${dot(nextR.time)}</b><small>${nextR.guests} orang · ${esc(nextR.area)} · ${esc(nextR.code)}</small></span>${icon('chevron-right', 'sm')}</a>` : ''}
 
       <div class="sec-h"><h2>What's new</h2></div>
@@ -574,18 +599,17 @@
      ========================================================= */
   let menuCtl = null;
   function menuCtx() {
-    if (S.mode === 'takeaway') {
-      return `${icon('bag', 'xs')}<span>Ambil di <b>${esc(C.storeName)} ${esc(C.branch)}</b></span>`;
-    }
     const r = activePreRsv();
     if (r) return `${icon('calendar', 'xs')}<span>Pre-order reservasi <b>${esc(dateShort(r.date))}, ${dot(r.time)}</b></span><button class="edit" data-act="cancel-pre">Batal</button>`;
-    return `${icon('utensils', 'xs')}<span>${S.table ? `Diantar ke <b>Meja ${esc(S.table)}</b>` : 'Nomor meja <b>belum diisi</b>'}</span><button class="edit" data-act="table">${S.table ? 'Ubah' : 'Isi'} ${icon('chevron-right', 'xs')}</button>`;
+    if (S.mode === 'delivery') {
+      return `${icon('scooter', 'xs')}<span>Diantar <b>GoSend / GrabExpress</b>${S.addr.text.trim() ? ` ke <b>${esc(shortAddr(S.addr.text))}</b>` : ' ke alamatmu'}</span>`;
+    }
+    return `${icon('bag', 'xs')}<span>Ambil di <b>${esc(C.storeName)} ${esc(C.branch)}</b>, tanpa antre</span>`;
   }
   function segHTML(act) {
-    return `<div class="seg" data-v="${S.mode}" role="tablist" aria-label="Tipe pesanan">
-      <button role="tab" aria-selected="${S.mode === 'dinein'}" class="${S.mode === 'dinein' ? 'on' : ''}" data-act="${act}" data-mode="dinein">${icon('utensils', 'sm')} Dine In</button>
-      <button role="tab" aria-selected="${S.mode === 'takeaway'}" class="${S.mode === 'takeaway' ? 'on' : ''}" data-act="${act}" data-mode="takeaway">${icon('bag', 'sm')} Take Away</button>
-    </div>`;
+    const v = activePreRsv() ? 'preorder' : S.mode;
+    const b = (m, ic, label) => `<button role="tab" aria-selected="${v === m}" class="${v === m ? 'on' : ''}" data-act="${act}" data-mode="${m}">${icon(ic, 'sm')} ${label}</button>`;
+    return `<div class="seg" data-v="${v}" role="tablist" aria-label="Tipe pesanan">${b('pickup', 'bag', 'Pick Up')}${b('delivery', 'scooter', 'Delivery')}</div>`;
   }
   const Menu = {
     html() {
@@ -783,27 +807,6 @@
     focusLater(inp, prime, 380);
   }
 
-  /* ---------- table sheet ---------- */
-  function openTable(after) {
-    const prime = primeKeyboard();
-    const sh = openSheet(`
-      <div class="sheet-body"><div class="sheet-head"><h2>Kamu di meja nomor berapa?</h2><p>Lihat nomor pada stiker QR di meja. Pesanan akan kami antar ke meja tersebut.</p></div>
-        <div class="sheet-pad"><label class="sr" for="tbl-in">Nomor meja</label><input class="input" id="tbl-in" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="Contoh: 12" value="${esc(S.table)}" style="font-size:26px;font-weight:600;text-align:center;height:66px;background:var(--bg);box-shadow:none"><span class="err-msg" id="tbl-err" hidden>Isi nomor meja dulu, ya.</span></div>
-      </div>
-      <div class="sheet-foot"><button class="btn soft" data-act="close">Nanti saja</button><button class="btn grow" data-s="save">Simpan</button></div>`);
-    const inp = $('#tbl-in', sh);
-    const doSave = () => {
-      const v = digits(inp.value).slice(0, 3);
-      if (!v) { inp.classList.add('err'); $('#tbl-err', sh).hidden = false; return; }
-      S.table = v; save('table');
-      closeSheet(() => { refreshMenuHead(); if (parseHash().path === '/checkout') rerender(); updateCartBar(); toast(`Meja ${v} tersimpan`); if (after) after(); });
-    };
-    $('[data-s="save"]', sh).addEventListener('click', doSave);
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSave(); });
-    inp.addEventListener('input', () => { inp.value = digits(inp.value).slice(0, 3); });
-    focusLater(inp, prime, 380);
-  }
-
   /* ---------- store sheet ---------- */
   function hoursTable() {
     const today = jkt().getDay();
@@ -869,33 +872,53 @@
       const slots = pickupSlots();
       if (!slots.find((s) => s.v === S.pickup)) S.pickup = slots[0] ? slots[0].v : 'asap';
       const pre = activePreRsv();
+      const kind = pre ? 'preorder' : S.mode;
+      const dlv = kind === 'delivery';
+      if (dlv && S.pay === 'cashier') S.pay = 'qris';
+      const pays = dlv ? PAYS.filter((m) => m.id !== 'cashier') : PAYS;
+      const km = dlvKm(); const cr = courierOf(S.courier); const fee = dlv ? dlvFee(cr, km) : 0;
+      const far = dlv && km > DLV.maxKm;
       const open = isOpen();
       const p = S.profile;
-      return `${back}
-      <div class="co">
-        ${!open ? `<div class="note-bar">${icon('clock', 'sm')}<span>Kami sedang tutup (buka ${dot(C.open)}–${dot(C.close)} WIB). ${S.mode === 'takeaway' ? 'Pilih jadwal ambil di bawah.' : 'Pesanan dine in diproses saat kami buka.'}</span></div>` : ''}
-        <div class="card">
-          ${segHTML('co-mode')}
-          ${S.mode === 'dinein' ? (pre ? `
-            <div class="switch-row" style="border:0;margin-top:14px;padding:0">
+      const closedNote = { pickup: 'Pilih jadwal ambil di bawah.', delivery: 'Pesanan delivery dikirim begitu kami buka.', preorder: 'Pre-order disiapkan menjelang jam reservasi.' }[kind];
+      let typeBody;
+      if (pre) {
+        typeBody = `
+            <div class="switch-row" style="border:0;margin-top:0;padding:0">
               <span class="lv-ico" style="width:44px;height:44px;border-radius:13px;background:var(--sand);display:grid;place-items:center">${icon('calendar')}</span>
               <div class="grow"><b>Pre-order reservasi ${esc(pre.code)}</b><small>${esc(dateShort(pre.date))}, ${dot(pre.time)} · ${pre.guests} orang — disiapkan saat kamu tiba</small></div>
               <button class="btn sm soft" data-act="cancel-pre">Batal</button>
-            </div>` : `
-            <div class="table-in" style="margin-top:14px">
-              <input class="input" id="tbl" data-bind="table" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="No." value="${esc(S.table)}" aria-label="Nomor meja">
-              <p><b style="color:var(--ink)">Nomor meja</b><br>Lihat nomor pada stiker QR di meja kamu. Pesanan diantar ke meja.</p>
-            </div><span class="err-msg" id="tbl-err" hidden>Isi nomor meja dulu, ya.</span>`) : `
-            <div class="slot-lbl" style="margin-top:16px">Waktu ambil di counter</div>
+            </div>`;
+      } else if (dlv) {
+        typeBody = `${segHTML('co-mode')}
+            <div class="slot-lbl" style="margin-top:16px">Alamat pengantaran</div>
+            <label class="field"><span class="sr">Alamat lengkap</span><textarea class="textarea" id="f-addr" data-bind="addr.text" autocomplete="street-address" placeholder="Nama jalan, nomor rumah, RT/RW, kelurahan">${esc(S.addr.text)}</textarea><span class="err-msg" hidden>Isi alamat lengkap, ya.</span></label>
+            <button class="loc-btn ${S.addr.km != null ? 'ok' : ''}" data-act="locate">${icon('locate', 'sm')}<span>${S.addr.km != null ? `Lokasi terdeteksi · ±${kmLabel(S.addr.km)} dari ${esc(C.storeName)}` : 'Pakai lokasi saya untuk hitung jarak'}</span></button>
+            <label class="field" style="margin-top:10px"><span class="sr">Patokan</span><input class="input" data-bind="addr.note" placeholder="Patokan untuk driver (opsional)" value="${esc(S.addr.note)}"></label>
+            <div class="slot-lbl" style="margin-top:16px">Kurir</div>
+            ${DLV.couriers.map((c) => `<button class="pay ${S.courier === c.id ? 'on' : ''}" data-act="courier" data-v="${c.id}" role="radio" aria-checked="${S.courier === c.id}">
+              <span class="pl" style="background:${c.bg};font-size:9.5px">${c.mark}</span>
+              <span class="grow"><b>${c.name}</b><small>${c.by} · tiba ±${dlvEta(km)} menit</small></span><span class="cf">${rp(dlvFee(c, km))}</span><span class="mark"></span></button>`).join('')}
+            ${far ? `<div class="note-bar" style="margin:12px 0 0">${icon('info', 'sm')}<span>Lokasimu ±${kmLabel(km)} dari ${esc(C.storeName)}, di luar jangkauan pengantaran (maks ${DLV.maxKm} km). Coba Pick Up, ya.</span></div>`
+              : `<div class="note-bar olive" style="margin:12px 0 0">${icon('info', 'sm')}<span>Driver ${esc(cr.by)} dipesan otomatis begitu pesananmu siap. ${S.addr.km == null ? `Sebelum lokasimu terdeteksi, ongkir dihitung untuk ±${kmLabel(DLV.defaultKm)}.` : 'Ongkir mengikuti tarif kurir saat pesanan dibuat.'}</span></div>`}`;
+      } else {
+        typeBody = `${segHTML('co-mode')}
+            <div class="slot-lbl" style="margin-top:16px">Waktu ambil di counter pick-up</div>
             <div class="hscroll times">${slots.map((s) => `<button class="chip ${S.pickup === s.v ? 'on' : ''}" data-act="pickup" data-v="${s.v}"><span>${s.t}</span><small>${s.s}</small></button>`).join('')}</div>
-            <div class="switch-row"><div class="grow"><b>Perlu alat makan?</b><small>Sendok, garpu &amp; tisu</small></div><button class="switch ${S.cutlery ? 'on' : ''}" data-act="cutlery" role="switch" aria-checked="${S.cutlery}" aria-label="Alat makan"></button></div>`}
+            <p class="faint" style="font-size:12px;margin:10px 0 0">Tanpa antre: pesananmu langsung disiapkan, tinggal ambil di counter dengan menyebut nama atau kode pesanan.</p>
+            <div class="switch-row"><div class="grow"><b>Perlu alat makan?</b><small>Sendok, garpu &amp; tisu</small></div><button class="switch ${S.cutlery ? 'on' : ''}" data-act="cutlery" role="switch" aria-checked="${S.cutlery}" aria-label="Alat makan"></button></div>`;
+      }
+      return `${back}
+      <div class="co">
+        ${!open ? `<div class="note-bar">${icon('clock', 'sm')}<span>Kami sedang tutup (buka ${dot(C.open)}–${dot(C.close)} WIB). ${closedNote}</span></div>` : ''}
+        <div class="card ${dlv ? 'bg-in' : ''}">${typeBody}
         </div>
 
         <div class="card bg-in">
-          <h3>${icon('user', 'sm')} Data pemesan</h3>
+          <h3>${icon('user', 'sm')} ${dlv ? 'Data penerima' : 'Data pemesan'}</h3>
           <div class="form-grid">
-            <label class="field"><span>Nama <em>— dipanggil saat pesanan siap</em></span><input class="input" id="f-name" data-bind="name" autocomplete="name" placeholder="Nama kamu" value="${esc(p.name)}"><span class="err-msg" hidden>Isi nama kamu.</span></label>
-            <label class="field"><span>No. WhatsApp ${S.mode === 'dinein' ? '<em>(opsional)</em>' : ''}</span><input class="input" id="f-phone" data-bind="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="08xxxxxxxxxx" value="${esc(p.phone)}"><span class="err-msg" hidden>Nomor WhatsApp belum valid.</span></label>
+            <label class="field"><span>${dlv ? 'Nama penerima' : 'Nama <em>— dipanggil saat pesanan siap</em>'}</span><input class="input" id="f-name" data-bind="name" autocomplete="name" placeholder="Nama kamu" value="${esc(p.name)}"><span class="err-msg" hidden>Isi nama kamu.</span></label>
+            <label class="field"><span>No. WhatsApp ${pre ? '<em>(opsional)</em>' : dlv ? '<em>— dihubungi driver</em>' : ''}</span><input class="input" id="f-phone" data-bind="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="08xxxxxxxxxx" value="${esc(p.phone)}"><span class="err-msg" hidden>Nomor WhatsApp belum valid.</span></label>
           </div>
         </div>
 
@@ -914,58 +937,69 @@
 
         <div class="card">
           <h3>${icon('wallet', 'sm')} Metode pembayaran</h3>
-          ${PAYS.map((m) => `<button class="pay ${S.pay === m.id ? 'on' : ''}" data-act="pay" data-v="${m.id}" role="radio" aria-checked="${S.pay === m.id}">
+          ${pays.map((m) => `<button class="pay ${S.pay === m.id ? 'on' : ''}" data-act="pay" data-v="${m.id}" role="radio" aria-checked="${S.pay === m.id}">
             <span class="pl" style="background:${m.bg}">${m.mark}</span>
             <span class="grow"><b>${m.name}</b>${m.sub ? `<small>${m.sub}</small>` : ''}</span><span class="mark"></span></button>`).join('')}
+          ${dlv ? '<p class="faint" style="font-size:12px;margin:8px 0 0">Delivery dibayar online, termasuk ongkir.</p>' : ''}
         </div>
 
         <div class="card">
           <h3>Ringkasan pembayaran</h3>
           <div class="sum-row"><span>Harga (${t.count} item)</span><span>${rp(t.total)}</span></div>
           ${C.taxRate ? `<div class="sum-row"><span>Termasuk ${esc(C.taxLabel)}</span><span>${rp(t.tax)}</span></div>` : ''}
-          <div class="sum-row total"><span>Total</span><span>${rp(t.total)}</span></div>
+          ${dlv ? `<div class="sum-row"><span>Ongkir ${esc(cr.name)} (±${kmLabel(km)})</span><span>${rp(fee)}</span></div>` : ''}
+          <div class="sum-row total"><span>Total</span><span>${rp(t.total + fee)}</span></div>
         </div>
       </div>
       <div class="paybar">
-        <div class="pb-t"><small>Total bayar</small><b>${rp(t.total)}</b></div>
-        <button class="btn" data-act="place">${S.pay === 'cashier' ? 'Pesan Sekarang' : 'Pesan & Bayar'}</button>
+        <div class="pb-t"><small>Total bayar</small><b>${rp(t.total + fee)}</b></div>
+        <button class="btn ${far ? 'dis' : ''}" data-act="place">${S.pay === 'cashier' ? 'Pesan Sekarang' : 'Pesan & Bayar'}</button>
       </div>`;
     },
   };
 
   function placeOrder() {
-    const pre = S.mode === 'dinein' ? activePreRsv() : null;
+    const pre = activePreRsv();
+    const kind = pre ? 'preorder' : S.mode;
     const p = S.profile;
     const errs = [];
-    if (S.mode === 'dinein' && !pre && !S.table) {
-      const i = $('#tbl'); i.classList.add('err'); $('#tbl-err').hidden = false; errs.push(i);
+    if (kind === 'delivery') {
+      const a = $('#f-addr');
+      if ((S.addr.text || '').trim().length < 8) { a.classList.add('err'); a.nextElementSibling.hidden = false; errs.push(a); }
     }
     const nm = $('#f-name'); const ph = $('#f-phone');
     if ((p.name || '').trim().length < 2) { nm.classList.add('err'); nm.nextElementSibling.hidden = false; errs.push(nm); }
-    if ((S.mode === 'takeaway' || p.phone) && !okPhone(p.phone)) { ph.classList.add('err'); ph.nextElementSibling.hidden = false; errs.push(ph); }
+    if ((kind !== 'preorder' || p.phone) && !okPhone(p.phone)) { ph.classList.add('err'); ph.nextElementSibling.hidden = false; errs.push(ph); }
     if (errs.length) { errs[0].scrollIntoView({ behavior: 'smooth', block: 'center' }); toast('Lengkapi data dulu, ya', 'info'); return; }
-    save('profile');
+    if (kind === 'delivery' && dlvKm() > DLV.maxKm) { toast(`Di luar jangkauan pengantaran (maks ${DLV.maxKm} km)`, 'info'); return; }
+    save('profile', 'addr');
 
     const t = totals(S.cart);
     const day = ymd(jkt());
     const qn = store.get('queue', { day: '', n: 0 });
     if (qn.day !== day) { qn.day = day; qn.n = 0; }
     qn.n += 1; store.set('queue', qn);
+    const km = dlvKm(); const cr = courierOf(S.courier);
+    const fee = kind === 'delivery' ? dlvFee(cr, km) : 0;
     const o = {
       id: uid(), code: (C.orderPrefix || 'MG-') + rand4(), queue: String(qn.n).padStart(3, '0'), createdAt: Date.now(),
-      mode: S.mode, table: S.mode === 'dinein' && !pre ? S.table : '', rsvId: pre ? pre.id : null, rsvCode: pre ? pre.code : null,
+      mode: kind, rsvId: pre ? pre.id : null, rsvCode: pre ? pre.code : null,
       rsvAt: pre ? rsvEpoch(pre) : null,
-      pickupAt: S.mode === 'takeaway' && S.pickup !== 'asap'
+      pickupAt: kind === 'pickup' && S.pickup !== 'asap'
         ? rsvEpoch({ date: ymd(addDays(jkt(), S.pickup.startsWith('B|') ? 1 : 0)), time: S.pickup.replace('B|', '') }) : null,
-      pickup: S.mode === 'takeaway' ? S.pickup : null, cutlery: S.mode === 'takeaway' ? S.cutlery : false,
-      name: p.name.trim(), phone: p.phone.trim(), pay: S.pay, paid: false, paidAt: null, doneAt: null,
+      pickup: kind === 'pickup' ? S.pickup : null, cutlery: kind === 'pickup' ? S.cutlery : false,
+      dlv: kind === 'delivery' ? {
+        addr: S.addr.text.trim(), note: (S.addr.note || '').trim(), km, located: S.addr.km != null,
+        courier: cr.id, courierName: cr.name, by: cr.by, fee, eta: dlvEta(km), driver: pickDriver(),
+      } : null,
+      name: p.name.trim(), phone: p.phone.trim(), pay: kind === 'delivery' && S.pay === 'cashier' ? 'qris' : S.pay, paid: false, paidAt: null, doneAt: null,
       lines: S.cart.map((l) => ({ id: l.id, name: ITEMS[l.id].name, img: lineImg(l.id, l.sel), qty: l.qty, sel: l.sel, note: l.note, sum: summary(l), unit: unit(l).p })),
-      total: t.total, tax: t.tax, count: t.count,
+      sub: t.total, total: t.total + fee, tax: t.tax, count: t.count,
     };
     S.orders.unshift(o); save('orders');
     if (pre) { pre.orderId = o.id; save('rsvs'); S.preRsv = null; save('preRsv'); }
     S.cart = []; save('cart');
-    processing('Mengirim pesanan…', 1000).then(() => {
+    processing(kind === 'delivery' ? 'Mengirim pesanan & memesan kurir…' : 'Mengirim pesanan…', 1000).then(() => {
       replace('/order/' + o.id);
       if (o.pay !== 'cashier') setTimeout(() => openPayment(o), 450);
       else toast('Pesanan terkirim!');
@@ -1012,7 +1046,7 @@
       </div>
       <div class="sheet-foot" style="flex-direction:column;align-items:stretch">
         <button class="btn block" data-s="paid">Saya sudah bayar</button>
-        <button class="btn block soft" data-s="cashier" style="height:44px">Bayar di kasir saja</button>
+        ${o.mode === 'delivery' ? '' : '<button class="btn block soft" data-s="cashier" style="height:44px">Bayar di kasir saja</button>'}
       </div>`, { onClose: () => clearInterval(timer) });
     drawQR($('#qr', sh), o.code);
     const pt = $('#pt', sh);
@@ -1056,8 +1090,7 @@
     return { step: t < DEMO_STATUS_SECONDS[0] ? 0 : t < DEMO_STATUS_SECONDS[1] ? 1 : 2 };
   }
   function stateText(o) {
-    const st = orderState(o); const din = o.mode === 'dinein';
-    const where = din ? (o.rsvCode ? 'mejamu saat kamu tiba' : `Meja ${o.table}`) : 'counter pick-up';
+    const st = orderState(o); const dl = o.dlv;
     switch (st.step) {
       case -1: return { title: 'Menunggu pembayaran', sub: 'Selesaikan pembayaran agar pesananmu segera kami siapkan.' };
       case 0: return st.scheduled
@@ -1065,11 +1098,16 @@
           ? { title: 'Pre-order terjadwal', sub: 'Pesananmu akan disiapkan menjelang jam reservasi.' }
           : { title: 'Pesanan terjadwal', sub: `Pesananmu akan disiapkan menjelang jam ambil (${pickupLabel(o.pickup)}).` })
         : { title: 'Pesanan diterima', sub: 'Barista kami sudah menerima pesananmu.' };
-      case 1: return { title: 'Sedang disiapkan', sub: 'Pesananmu sedang dibuat dengan sepenuh hati.' };
-      case 2: return din
-        ? { title: 'Siap disajikan', sub: `Pesanan sedang diantar ke ${where}.` }
-        : { title: 'Siap diambil', sub: `Ambil di ${where} dan sebutkan nama “${o.name}” atau kode ${o.code}.` };
-      default: return { title: 'Selesai', sub: `Terima kasih sudah mampir. Sampai jumpa lagi di ${C.storeName}.` };
+      case 1: return dl
+        ? { title: 'Sedang disiapkan', sub: `Pesananmu sedang dibuat. Driver ${dl.by} dipesan otomatis begitu pesanan siap.` }
+        : { title: 'Sedang disiapkan', sub: 'Pesananmu sedang dibuat dengan sepenuh hati.' };
+      case 2:
+        if (dl) return { title: 'Sedang diantar', sub: `${dl.driver.name} (${dl.courierName}) sedang menuju alamatmu. Estimasi tiba ±${Math.max(5, Math.ceil(dl.km * 3))} menit.` };
+        if (isPickup(o)) return { title: 'Siap diambil', sub: `Langsung ambil di counter pick-up tanpa antre. Sebutkan nama “${o.name}” atau kode ${o.code}.` };
+        return { title: 'Siap disajikan', sub: `Pesanan sedang diantar ke ${o.rsvCode ? 'mejamu saat kamu tiba' : 'Meja ' + o.table}.` };
+      default: return dl
+        ? { title: 'Pesanan tiba', sub: `Terima kasih sudah memesan di ${C.storeName}. Selamat menikmati!` }
+        : { title: 'Selesai', sub: `Terima kasih sudah mampir. Sampai jumpa lagi di ${C.storeName}.` };
     }
   }
   const payLabel = (o) => {
@@ -1078,13 +1116,18 @@
     return `${m.name} · ${o.paid ? 'Lunas' : 'Belum dibayar'}`;
   };
   function orderMsg(o) {
-    const type = o.mode === 'dinein' ? `Dine In · ${o.rsvCode ? 'pre-order reservasi ' + o.rsvCode : 'Meja ' + o.table}` : `Take Away · ${pickupLabel(o.pickup)}${o.cutlery ? ' · perlu alat makan' : ''}`;
+    const dl = o.dlv;
+    const type = dl ? `Delivery · ${dl.courierName} (±${kmLabel(dl.km)})`
+      : isPickup(o) ? `Pick Up · ${pickupLabel(o.pickup)}${o.cutlery ? ' · perlu alat makan' : ''}`
+        : o.rsvCode ? `Pre-order reservasi ${o.rsvCode}` : `Dine In · Meja ${o.table}`;
     return [
       `Halo ${C.storeName}, saya pesan lewat website:`, '',
       `*${o.code}* (antrean ${o.queue})`,
       `Tipe: ${type}`,
-      `Nama: ${o.name}${o.phone ? ' · ' + o.phone : ''}`, '',
+      `Nama: ${o.name}${o.phone ? ' · ' + o.phone : ''}`,
+      ...(dl ? [`Alamat: ${dl.addr}${dl.note ? ' (' + dl.note + ')' : ''}`] : []), '',
       ...o.lines.map((l) => `${l.qty}x ${l.name}${l.sum ? ' (' + l.sum + ')' : ''}${l.note ? ' — "' + l.note + '"' : ''}`), '',
+      ...(dl ? [`Subtotal: ${rp(o.sub)}`, `Ongkir: ${rp(dl.fee)}`] : []),
       `Total: ${rp(o.total)}`,
       `Pembayaran: ${payLabel(o)}`,
     ].join('\n');
@@ -1105,28 +1148,38 @@
       const o = S.orders.find((x) => x.id === m[1]);
       const bar = `<header class="appbar"><button class="icon-btn" data-act="back" data-to="/pesanan" aria-label="Kembali">${icon('chevron-left')}</button><h1>Status Pesanan</h1><span class="spacer"></span></header>`;
       if (!o) return `${bar}<div class="empty"><h3>Pesanan tidak ditemukan</h3><a class="btn" href="#/pesanan">Lihat pesanan</a></div>`;
-      const st = orderState(o); const tx = stateText(o); const din = o.mode === 'dinein';
-      const labels = ['Pesanan diterima', 'Sedang disiapkan', din ? 'Disajikan di meja' : 'Siap diambil', 'Selesai'];
-      const subs = [clock(o.paidAt || o.createdAt), 'Barista & dapur', din ? (o.rsvCode ? 'Saat kamu tiba' : 'Meja ' + o.table) : 'Counter pick-up', ''];
+      const st = orderState(o); const tx = stateText(o); const dl = o.dlv; const pu = isPickup(o);
+      const labels = dl ? ['Pesanan diterima', 'Sedang disiapkan', 'Diantar driver', 'Tiba di tujuan']
+        : ['Pesanan diterima', 'Sedang disiapkan', pu ? 'Siap diambil' : 'Disajikan di meja', 'Selesai'];
+      const subs = [clock(o.paidAt || o.createdAt), dl ? `Barista & dapur · kurir ${dl.by} dipesan` : 'Barista & dapur',
+        dl ? dl.courierName : pu ? 'Counter pick-up · tanpa antre' : (o.rsvCode ? 'Saat kamu tiba' : 'Meja ' + o.table), dl ? shortAddr(dl.addr) : ''];
+      const driverCard = dl && st.step >= 1 ? `<div class="card driver">${st.step === 1
+        ? `<span class="dv-av pulse">${icon('scooter')}</span><span class="grow"><b>Memesan driver ${esc(dl.by)}…</b><small>${esc(dl.courierName)} · otomatis saat pesanan siap</small></span>`
+        : `<span class="dv-av">${esc(dl.driver.name.split(' ').map((w) => w[0]).join('').slice(0, 2))}</span><span class="grow"><b>${esc(dl.driver.name)}</b><small>${esc(dl.driver.plate)} · ${esc(dl.driver.bike)}</small><small>${esc(dl.courierName)}</small></span><button class="icon-btn" data-act="driver" data-by="${esc(dl.by)}" aria-label="Hubungi driver">${icon('chat', 'sm')}</button>`}</div>
+        <p class="proto-note">Prototipe: data driver masih simulasi. Di versi final, pesanan diteruskan ke API ${esc(dl.courierName)} dan driver serta lokasinya tampil langsung di sini.</p>` : '';
       return `${bar}
       <div class="track-hero">${cupSVG(st.step >= 2)}<h1 id="st-title">${esc(tx.title)}</h1><p>${esc(tx.sub)}</p></div>
       ${st.step === -1 ? `<div class="pad" style="margin-top:14px"><button class="btn block" data-act="pay-now" data-id="${o.id}">${icon('qr', 'sm')} Bayar sekarang · ${rp(o.total)}</button></div>` : ''}
       <div class="card queue"><div><small>No. antrean</small><b>${esc(o.queue)}</b></div><i></i><div><small>Kode pesanan</small><b class="code">${esc(o.code)}</b></div></div>
+      ${driverCard}
       ${st.step >= 0 ? `<div class="card tl">${labels.map((l, i) => `<div class="tl-s ${i < st.step || st.step === 3 ? 'done' : i === st.step ? 'cur' : ''}"><span class="dot">${i < st.step || st.step === 3 ? icon('check', 'xs') : ''}</span><div><b>${l}</b>${subs[i] ? `<small>${esc(subs[i])}</small>` : ''}</div></div>`).join('')}</div>` : ''}
       <div class="card receipt">
-        <div class="rc-h"><b>Detail pesanan</b><span class="tag ${din ? '' : 'olive'}">${din ? 'Dine In' : 'Take Away'}</span></div>
+        <div class="rc-h"><b>Detail pesanan</b><span class="tag ${pu || dl ? 'olive' : ''}">${KIND[o.mode] || 'Pesanan'}</span></div>
         <div class="kv"><span>Waktu pesan</span><span>${esc(stampLabel(o.createdAt))}</span></div>
-        ${din ? `<div class="kv"><span>${o.rsvCode ? 'Reservasi' : 'Meja'}</span><span>${o.rsvCode ? esc(o.rsvCode) : 'No. ' + esc(o.table)}</span></div>` : `<div class="kv"><span>Ambil</span><span>${esc(pickupLabel(o.pickup))}</span></div>${o.cutlery ? '<div class="kv"><span>Alat makan</span><span>Ya</span></div>' : ''}`}
+        ${dl ? `<div class="kv"><span>Alamat</span><span>${esc(dl.addr)}</span></div>${dl.note ? `<div class="kv"><span>Patokan</span><span>${esc(dl.note)}</span></div>` : ''}<div class="kv"><span>Kurir</span><span>${esc(dl.courierName)} · ±${kmLabel(dl.km)}</span></div>`
+          : pu ? `<div class="kv"><span>Ambil</span><span>${esc(pickupLabel(o.pickup))}</span></div>${o.cutlery ? '<div class="kv"><span>Alat makan</span><span>Ya</span></div>' : ''}`
+            : `<div class="kv"><span>${o.rsvCode ? 'Reservasi' : 'Meja'}</span><span>${o.rsvCode ? esc(o.rsvCode) : 'No. ' + esc(o.table)}</span></div>`}
         <div class="kv"><span>Nama</span><span>${esc(o.name)}</span></div>
         <div class="kv"><span>Pembayaran</span><span>${esc(payLabel(o))}</span></div>
         <div class="rc-sep"></div>
         ${o.lines.map((l) => `<div class="rc-line"><span class="q">${l.qty}x</span><span class="n">${esc(l.name)}${l.sum ? `<small>${esc(l.sum)}</small>` : ''}${l.note ? `<small>“${esc(l.note)}”</small>` : ''}</span><span>${rp(l.unit * l.qty)}</span></div>`).join('')}
         <div class="rc-sep"></div>
+        ${dl ? `<div class="kv"><span>Subtotal</span><span>${rp(o.sub)}</span></div><div class="kv"><span>Ongkir ${esc(dl.courierName)}</span><span>${rp(dl.fee)}</span></div>` : ''}
         ${C.taxRate ? `<div class="kv"><span>Termasuk ${esc(C.taxLabel)}</span><span>${rp(o.tax)}</span></div>` : ''}
         <div class="kv" style="font-size:16px"><span style="color:var(--ink);font-weight:600">Total</span><span style="font-weight:700">${rp(o.total)}</span></div>
       </div>
       <div class="actions ${st.step === 2 ? '' : 'two'}" style="padding-bottom:calc(28px + var(--safe-b))">
-        ${st.step === 2 ? `<button class="btn olive block" data-act="received" data-id="${o.id}">${icon('check', 'sm')} Pesanan sudah ${din ? 'diterima' : 'diambil'}</button><div class="actions two" style="margin:0">` : ''}
+        ${st.step === 2 ? `<button class="btn olive block" data-act="received" data-id="${o.id}">${icon('check', 'sm')} Pesanan sudah ${pu ? 'diambil' : 'diterima'}</button><div class="actions two" style="margin:0">` : ''}
         <a class="btn ghost" href="${waLink(orderMsg(o))}" target="_blank" rel="noopener">${icon('chat', 'sm')} WhatsApp</a>
         <button class="btn soft" data-act="reorder" data-id="${o.id}">${icon('rotate', 'sm')} Pesan lagi</button>
         ${st.step === 2 ? '</div>' : ''}
@@ -1137,7 +1190,7 @@
       let last = orderState(o).step;
       const t = setInterval(() => {
         const s = orderState(o).step;
-        if (s !== last && !sheetStack.length) { last = s; rerender(); if (s === 2) { vibrate(); toast(o.mode === 'dinein' ? 'Pesananmu siap disajikan' : 'Pesananmu siap diambil!', 'coffee'); } }
+        if (s !== last && !sheetStack.length) { last = s; rerender(); if (s === 2) { vibrate(); toast(o.dlv ? 'Pesananmu sedang diantar driver' : isPickup(o) ? 'Pesananmu siap diambil!' : 'Pesananmu siap disajikan', o.dlv ? 'scooter' : 'coffee'); } }
       }, 1000);
       cleanup.push(() => clearInterval(t));
     },
@@ -1335,9 +1388,9 @@
   function orderCard(o) {
     const st = orderState(o); const tx = stateText(o);
     const tag = st.step === 3 ? '<span class="tag">Selesai</span>' : st.step === -1 ? '<span class="tag warn">Belum dibayar</span>' : `<span class="tag olive"><i class="dot"></i>${esc(tx.title)}</span>`;
-    const where = o.mode === 'dinein' ? (o.rsvCode ? 'Pre-order' : `Meja ${o.table}`) : pickupLabel(o.pickup).replace(/ \(.+\)/, '');
+    const where = o.dlv ? o.dlv.courierName : isPickup(o) ? pickupLabel(o.pickup).replace(/ \(.+\)/, '') : o.rsvCode || `Meja ${o.table}`;
     return `<a class="card oc" href="#/order/${o.id}">
-      <div class="oc-h"><span class="ic">${icon(o.mode === 'dinein' ? 'utensils' : 'bag', 'sm')}</span><span class="grow"><b>${o.mode === 'dinein' ? 'Dine In' : 'Take Away'} · ${esc(where)}</b><small>${esc(o.code)} · ${esc(stampLabel(o.createdAt))}</small></span>${tag}</div>
+      <div class="oc-h"><span class="ic">${icon(KIND_ICON[o.mode] || 'bag', 'sm')}</span><span class="grow"><b>${KIND[o.mode] || 'Pesanan'} · ${esc(where)}</b><small>${esc(o.code)} · ${esc(stampLabel(o.createdAt))}</small></span>${tag}</div>
       <div class="oc-items">${o.lines.map((l) => `${l.qty}x ${esc(l.name)}`).join(', ')}</div>
       <div class="oc-f"><span>${rp(o.total)}</span>${st.step === 3 ? `<span class="btn sm soft" data-act="reorder" data-id="${o.id}">${icon('rotate', 'xs')} Pesan lagi</span>` : `<span class="faint" style="font-weight:500;font-size:12.5px;display:inline-flex;align-items:center;gap:2px">Lacak ${icon('chevron-right', 'xs')}</span>`}</div>
     </a>`;
@@ -1359,7 +1412,7 @@
         const done = S.orders.filter((o) => orderState(o).step === 3);
         body = S.orders.length
           ? `${act.length ? `<div class="list-sub">Sedang berjalan</div>${act.map(orderCard).join('')}` : ''}${done.length ? `<div class="list-sub">Riwayat</div>${done.slice(0, 30).map(orderCard).join('')}` : ''}`
-          : `<div class="empty"><div class="em-ico">${icon('receipt', 'lg')}</div><h3>Belum ada pesanan</h3><p>Pesan dine in atau take away langsung dari ponselmu.</p><a class="btn" href="#/menu">Mulai Pesan</a></div>`;
+          : `<div class="empty"><div class="em-ico">${icon('receipt', 'lg')}</div><h3>Belum ada pesanan</h3><p>Pesan pick up atau delivery langsung dari ponselmu.</p><a class="btn" href="#/menu">Mulai Pesan</a></div>`;
       } else {
         const up = S.rsvs.filter((r) => rsvState(r) === 'upcoming').sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
         const old = S.rsvs.filter((r) => rsvState(r) !== 'upcoming');
@@ -1441,6 +1494,12 @@
   /* =========================================================
      ACTIONS (event delegation)
      ========================================================= */
+  // ganti tipe pesanan; pre-order reservasi ikut batal bila sedang aktif
+  function setMode(m) {
+    const hadPre = !!activePreRsv();
+    S.mode = normMode(m); S.preRsv = null; save('mode', 'preRsv');
+    if (hadPre) toast('Pre-order dibatalkan', 'info');
+  }
   const ACT = {
     close: () => closeSheet(),
     search: () => openSearch(),
@@ -1449,14 +1508,25 @@
     banner: (t) => go('/menu?cat=' + t.dataset.cat),
     checkout: () => go('/checkout'),
     back: (t) => { if (navDepth > 0) history.back(); else go(t.dataset.to || '/'); },
-    start: (t) => {
-      S.mode = t.dataset.mode; save('mode');
-      go('/menu');
-      if (S.mode === 'dinein' && !S.table && !activePreRsv()) setTimeout(() => openTable(), 420);
+    start: (t) => { S.mode = normMode(t.dataset.mode); S.preRsv = null; save('mode', 'preRsv'); go('/menu'); },
+    mode: (t) => { setMode(t.dataset.mode); refreshMenuHead(); updateCartBar(); vibrate(); },
+    'co-mode': (t) => { setMode(t.dataset.mode); rerender(); },
+    courier: (t) => { S.courier = t.dataset.v; save('courier'); rerender(); },
+    locate: (t) => {
+      const lbl = $('span', t);
+      if (!navigator.geolocation) { toast('Lokasi tidak tersedia di perangkat ini', 'info'); return; }
+      if (lbl) lbl.textContent = 'Mencari lokasimu…';
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const km = distKm(pos.coords.latitude, pos.coords.longitude);
+        S.addr.km = km; save('addr');
+        if (parseHash().path === '/checkout') rerender();
+        toast(km > DLV.maxKm ? `±${kmLabel(km)} — di luar jangkauan pengantaran` : `Jarak ±${kmLabel(km)} dari ${C.storeName}`, 'map-pin');
+      }, () => {
+        if (lbl) lbl.textContent = 'Pakai lokasi saya untuk hitung jarak';
+        toast('Lokasi tidak diizinkan, ongkir memakai estimasi', 'info');
+      }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
     },
-    mode: (t) => { S.mode = t.dataset.mode; save('mode'); refreshMenuHead(); updateCartBar(); vibrate(); },
-    'co-mode': (t) => { S.mode = t.dataset.mode; save('mode'); rerender(); },
-    table: () => openTable(),
+    driver: (t) => toast(`Simulasi: di versi final membuka chat driver di aplikasi ${t.dataset.by}`, 'chat'),
     cat: (t) => menuCtl && menuCtl.scrollTo(t.dataset.cat),
     quick: (t) => {
       const it = ITEMS[t.dataset.id];
@@ -1493,7 +1563,7 @@
       const o = S.orders.find((x) => x.id === t.dataset.id); if (!o) return;
       let n = 0;
       o.lines.forEach((l) => { if (ITEMS[l.id]) { addLine(l.id, l.sel, l.note, l.qty); n += l.qty; } });
-      S.mode = o.mode; save('mode');
+      S.mode = o.mode === 'delivery' ? 'delivery' : 'pickup'; S.preRsv = null; save('mode', 'preRsv');
       go('/checkout'); setTimeout(() => toast(`${n} item ditambahkan ke keranjang`), 250);
     },
     ptab: (t) => replace(t.dataset.v === 'rsv' ? '/pesanan?tab=rsv' : '/pesanan'),
@@ -1506,7 +1576,7 @@
     'rsv-ics': (t) => { const r = getRsv(t.dataset.id); if (r) downloadICS(r); },
     'rsv-pre': (t) => {
       const r = getRsv(t.dataset.id); if (!r) return;
-      S.preRsv = r.id; S.mode = 'dinein'; save('preRsv', 'mode');
+      S.preRsv = r.id; save('preRsv');
       go('/menu'); setTimeout(() => toast(`Pre-order untuk ${r.code}`, 'calendar'), 300);
     },
     'rsv-cancel': (t) => confirmSheet({
@@ -1553,7 +1623,7 @@
     },
     reset: () => confirmSheet({
       title: 'Hapus data?', text: 'Keranjang, riwayat pesanan, reservasi, dan profil di perangkat ini akan dihapus.', ok: 'Hapus', danger: true,
-      onOk: () => { ['cart', 'orders', 'rsvs', 'profile', 'rd', 'preRsv', 'table', 'queue'].forEach((k) => { try { localStorage.removeItem('mg_' + k); } catch (e) { /* noop */ } }); location.reload(); },
+      onOk: () => { ['cart', 'orders', 'rsvs', 'profile', 'rd', 'preRsv', 'addr', 'courier', 'mode', 'queue'].forEach((k) => { try { localStorage.removeItem('mg_' + k); } catch (e) { /* noop */ } }); location.reload(); },
     }),
   };
 
@@ -1577,10 +1647,11 @@
     const v = e.target.value;
     e.target.classList.remove('err');
     const msg = e.target.parentElement.querySelector('.err-msg'); if (msg) msg.hidden = true;
-    if (b === 'table') { e.target.value = digits(v).slice(0, 3); S.table = e.target.value; const te = $('#tbl-err'); if (te) te.hidden = true; }
-    else if (b === 'name' || b === 'phone') S.profile[b] = v;
+    if (b === 'name' || b === 'phone') S.profile[b] = v;
+    else if (b === 'addr.text') S.addr.text = v;
+    else if (b === 'addr.note') S.addr.note = v;
     else if (b === 'rd.note') draft().note = v;
-    clearTimeout(bindT); bindT = setTimeout(() => save('table', 'profile', 'rd'), 300);
+    clearTimeout(bindT); bindT = setTimeout(() => save('profile', 'addr', 'rd'), 300);
   });
 
   /* ---------- iPhone: :active states, keyboard & viewport ---------- */
@@ -1604,14 +1675,6 @@
   window.addEventListener('hashchange', () => { navDepth += 1; });
   if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   hydrate(document);
-
-  // QR meja: ?meja=12 atau #/menu?meja=12
-  const meja = new URLSearchParams(location.search).get('meja') || parseHash().q.get('meja');
-  if (meja && digits(meja)) {
-    S.mode = 'dinein'; S.table = digits(meja).slice(0, 3); S.preRsv = null; save('mode', 'table', 'preRsv');
-    history.replaceState(null, '', location.pathname + '#/menu');
-    setTimeout(() => toast(`Meja ${S.table} — selamat datang!`, 'utensils'), 1200);
-  }
   render();
 
   // splash

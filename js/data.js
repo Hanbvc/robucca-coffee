@@ -55,6 +55,17 @@ window.MG_CONFIG = {
     { v: "Bebas", img: "venue-table", sub: "Mana saja" },
   ],
   footNote: "Prototipe untuk demo · belum terhubung ke sistem kasir Robucca.",
+  /* Delivery lewat GoSend / GrabExpress.
+     Ongkir = maks(min, base + perKm × jarak), dibulatkan ke Rp500 — estimasi; tarif final dari API kurir. */
+  delivery: {
+    maxKm: 15,
+    defaultKm: 3,                      // dipakai sebelum lokasi pelanggan terdeteksi
+    roadFactor: 1.3,                   // jarak garis lurus → perkiraan jarak jalan
+    couriers: [
+      { id: "gosend", name: "GoSend Instant", by: "Gojek", mark: "GoSend", bg: "#00AA13", base: 5000, perKm: 2500, min: 12000 },
+      { id: "grab", name: "GrabExpress Instant", by: "Grab", mark: "Grab", bg: "#00B14F", base: 4000, perKm: 2700, min: 11500 },
+    ],
+  },
   sigCat: "signature",                 // kategori yang dibuka tombol "Lihat menu" di bagian Signature
 };
 

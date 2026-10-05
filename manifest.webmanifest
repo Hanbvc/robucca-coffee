@@ -1,7 +1,7 @@
 {
   "name": "Robucca — Pesan & Reservasi",
   "short_name": "Robucca",
-  "description": "Pesan dine in & take away, lihat menu, dan reservasi meja di Robucca Ijen Nirwana, Malang.",
+  "description": "Pesan pick up tanpa antre, delivery GoSend/Grab, dan reservasi meja di Robucca Ijen Nirwana, Malang.",
   "start_url": "./#/",
   "scope": "./",
   "display": "standalone",
