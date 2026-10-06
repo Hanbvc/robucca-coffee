@@ -1,0 +1,16 @@
+{
+  "name": "robucca",
+  "private": true,
+  "description": "Robucca: aplikasi pemesanan pelanggan + sistem POS multi-cabang (kasir, dapur, kantor pusat).",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning server/server.js",
+    "start:demo": "node --no-warnings=ExperimentalWarning server/server.js --demo",
+    "pair": "node --no-warnings=ExperimentalWarning server/server.js pair",
+    "test": "node --no-warnings=ExperimentalWarning --test tests/*.test.js",
+    "test:e2e": "node --no-warnings=ExperimentalWarning tests/e2e/run.js"
+  }
+}

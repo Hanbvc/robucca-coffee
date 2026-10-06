@@ -1,1 +1,7 @@
 .DS_Store
+node_modules/
+# database server pusat & cadangannya — jangan pernah di-commit
+data/
+*.db
+*.db-wal
+*.db-shm

@@ -6,6 +6,10 @@ Prototipe web app mobile untuk **Robucca Ijen Nirwana, Malang** (Rbc Group). Pel
 
 **Coba langsung (paling nyaman di ponsel):** https://hanbvc.github.io/robucca-coffee/
 
+## Sistem kasir (POS) multi-cabang
+
+Folder [`pos/`](pos/) berisi sistem kasir untuk semua cabang: kasir (tablet/PC), layar dapur/bar, layar antrean, dan kantor pusat (dasbor & laporan lintas cabang, menu & harga per cabang, stok, promo, karyawan, perangkat). Bisa dicoba tanpa server di `/pos/` (mode demo, data di browser), atau dijalankan dengan server pusat (`npm start`, Node.js 22.13+) agar semua cabang memakai satu database dan tetap bisa berjualan saat offline. Panduan lengkap: [pos/README.md](pos/README.md).
+
 ## Fitur
 
 - **Menu lengkap:** 95 menu dalam 15 kategori (Ramen, Bento, Rice Bowl, Snack, Pastry, Dessert, Coffee, Milk, Tea, Soda, dan lainnya) dengan foto dari buku menu.
