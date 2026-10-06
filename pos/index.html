@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Robucca POS</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="description" content="Sistem kasir (POS) multi-cabang Robucca: penjualan, dapur, shift, stok, dan laporan kantor pusat." />
+  <meta name="theme-color" content="#01512C" />
+  <meta name="color-scheme" content="light" />
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Robucca POS" />
+  <link rel="icon" type="image/png" href="../assets/brand/favicon.png" />
+  <link rel="apple-touch-icon" href="../assets/brand/apple-touch-icon.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Londrina+Solid:wght@400;900&family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/pos.css" />
+</head>
+<body>
+  <div id="boot" class="boot" role="status" aria-live="polite">
+    <div class="bx">
+      <img src="../assets/brand/wordmark-light.png" alt="Robucca" />
+      <div class="spinner"></div>
+      <p id="boot-msg">Membuka kasir…</p>
+    </div>
+  </div>
+  <div id="app"></div>
+  <noscript><p style="padding:24px">Aktifkan JavaScript untuk memakai Robucca POS.</p></noscript>
+
+  <!-- Menu awal (sama dengan aplikasi pemesanan pelanggan); setelah disiapkan, menu dikelola di Kantor › Menu -->
+  <script src="../js/data.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
