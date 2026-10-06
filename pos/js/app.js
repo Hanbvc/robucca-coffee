@@ -85,7 +85,14 @@ async function render() {
 }
 
 async function mount(name, params, layout, seq) {
-  const mod = await VIEWS[name]();
+  let mod;
+  try { mod = await VIEWS[name](); } catch (e) {
+    console.error(e);
+    if (!window.__posReady && window.__posBootFail) { window.__posBootFail(`Halaman tidak bisa dimuat: ${e.message || e}`); return; }
+    root.innerHTML = `<div class="empty"><div class="em-ico">${icon('wifi-off', 'lg')}</div><h3>Halaman tidak bisa dimuat</h3><p>${esc(e.message || e)}</p><button class="btn" data-reload>Muat ulang</button></div>`;
+    root.querySelector('[data-reload]').addEventListener('click', () => location.reload());
+    return;
+  }
   if (seq !== renderSeq) return;
   let host;
   if (layout === 'full') {
@@ -242,7 +249,9 @@ async function start() {
   try {
     S.be = await Backend.create();
   } catch (e) {
-    $('#boot-msg').textContent = `Penyimpanan perangkat tidak bisa dibuka: ${e.message || e}`;
+    console.error(e);
+    if (window.__posBootFail) window.__posBootFail(`Penyimpanan perangkat tidak bisa dibuka: ${e.message || e}`);
+    else $('#boot-msg').textContent = `Penyimpanan perangkat tidak bisa dibuka: ${e.message || e}`;
     return;
   }
   if (S.be.device) {
@@ -270,7 +279,14 @@ async function start() {
   });
   window.addEventListener('hashchange', render);
   const boot = $('#boot');
-  await render();
+  try {
+    await render();
+  } catch (e) {
+    console.error(e);
+    if (window.__posBootFail) window.__posBootFail(`Aplikasi gagal dimulai: ${e.message || e}`);
+    return;
+  }
+  window.__posReady = true;
   if (boot) { boot.style.transition = 'opacity .3s'; boot.style.opacity = '0'; setTimeout(() => boot.remove(), 320); }
   armIdle();
 }

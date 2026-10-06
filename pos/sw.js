@@ -4,10 +4,10 @@
    versi terbaru, lalu jatuh ke cache bila offline. API tidak pernah di-cache.
    Tambah berkas baru ke SHELL (tes tests/sw.test.js memeriksanya).
    ========================================================= */
-const VERSION = 'robucca-pos-v1';
+const VERSION = 'robucca-pos-v2';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/pos.css',
-  'js/app.js', 'js/ops.js', 'js/state.js',
+  'js/app.js', 'js/boot.js', 'js/ops.js', 'js/state.js',
   'js/components/approve.js', 'js/components/charts.js', 'js/components/numpad.js', 'js/components/orderDetail.js', 'js/components/receipt.js',
   'js/core/calc.js', 'js/core/dates.js', 'js/core/ids.js', 'js/core/money.js', 'js/core/perms.js', 'js/core/pin.js', 'js/core/report.js', 'js/core/seed.js', 'js/core/validate.js',
   'js/data/backend.js', 'js/data/bus.js', 'js/data/demo.js', 'js/data/local.js', 'js/data/master.js', 'js/data/remote.js',
