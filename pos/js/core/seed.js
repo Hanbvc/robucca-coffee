@@ -4,14 +4,15 @@
    Kantor › Menu. Cabang & staf contoh hanya dibuat untuk mode demo.
    ========================================================= */
 import { hashPin } from './pin.js';
+import { menuFromData } from './menu.js';
+
+export { menuFromData };
 
 export const MASTER_COLLS = ['settings', 'branches', 'categories', 'items', 'itemBranch', 'channels', 'payMethods', 'discounts', 'staff'];
 
 const COLORS = ['#01512C', '#9A6A3B', '#2F6E8F', '#8A3B5C', '#5B6B2E', '#B5651D', '#4E4A8C', '#2E7D6B'];
 export const staffColor = (i) => COLORS[i % COLORS.length];
 
-/** Stasiun dapur bawaan: minuman, pastry & dessert → Bar; makanan & snack → Dapur */
-const stationOf = (cat) => (cat.group === 'drinks' || ['pastry', 'dessert'].includes(cat.id) ? 'bar' : 'kitchen');
 
 export function defaultSettings(CONFIG = {}) {
   return {
@@ -61,22 +62,6 @@ export const DEFAULT_PAYS = [
   { id: 'shopeepay', name: 'ShopeePay', type: 'noncash', ref: false, active: true, sort: 8 },
   { id: 'transfer', name: 'Transfer Bank', type: 'noncash', ref: true, active: true, sort: 9 },
 ];
-
-/** Kategori & menu dari js/data.js (MG_MENU, MG_GROUPS) */
-export function menuFromData(MENU = [], { demo = false } = {}) {
-  const categories = []; const items = [];
-  MENU.forEach((c, ci) => {
-    categories.push({ id: c.id, name: c.name, group: c.group || '', station: stationOf(c), notes: c.notes || [], sort: ci + 1, active: true });
-    c.items.forEach((it, ii) => {
-      items.push({
-        id: it.id, catId: c.id, name: it.name, price: it.price, img: it.img === undefined ? it.id : it.img,
-        opts: it.opts ? JSON.parse(JSON.stringify(it.opts)) : [], sig: !!it.sig, active: true, sort: ii + 1,
-        track: demo && ['pastry', 'dessert'].includes(c.id), low: 5,
-      });
-    });
-  });
-  return { categories, items };
-}
 
 /**
  * Data master lengkap.

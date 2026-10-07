@@ -10,9 +10,17 @@ Prototipe web app mobile untuk **Robucca Ijen Nirwana, Malang** (Rbc Group). Pel
 
 Folder [`pos/`](pos/) berisi sistem kasir untuk semua cabang: kasir (tablet/PC), layar dapur/bar, layar antrean, dan kantor pusat (dasbor & laporan lintas cabang, menu & harga per cabang, stok, promo, karyawan, perangkat). Bisa dicoba tanpa server di `/pos/` (mode demo, data di browser), atau dijalankan dengan server pusat (`npm start`, Node.js 22.13+) agar semua cabang memakai satu database dan tetap bisa berjualan saat offline. Panduan lengkap: [pos/README.md](pos/README.md).
 
+## Menu untuk pelanggan
+
+Halaman [`menu/`](menu/) adalah menu yang bisa dilihat pelanggan tanpa memesan, untuk QR di meja, tautan di bio Instagram, atau tablet/TV di kasir. Urutannya **Minuman → Snack → Makanan Berat → Pastry & Dessert**, sama dengan aplikasi pemesanan dan kasir POS. Ada tab kelompok, chip kategori, pencarian, keterangan ukuran/penyajian (mis. *Iced · Large +4.000*, *Hot +2.000*), dan tanda **Habis**.
+
+- **Tanpa server** (mis. GitHub Pages): menampilkan menu standar dari `js/data.js`.
+- **Dari server POS** (`https://alamat-server/menu/?cabang=IJN`): harga khusus dan ketersediaan cabang itu, diperbarui tiap menit. Tautan setiap cabang ada di POS › Kantor › Menu & harga › **Menu pelanggan**. Di mode demo, tombol **Pratinjau** di sana menampilkan menu pelanggan dengan data demo cabang tersebut.
+- Agar menu di GitHub Pages ikut membaca server POS, isi `posServer` di `js/data.js`.
+
 ## Fitur
 
-- **Menu lengkap:** 95 menu dalam 15 kategori (Ramen, Bento, Rice Bowl, Snack, Pastry, Dessert, Coffee, Milk, Tea, Soda, dan lainnya) dengan foto dari buku menu.
+- **Menu lengkap:** 95 menu dalam 15 kategori dengan foto dari buku menu, diurutkan per kelompok: **Minuman** (Robucca Essentials, Signature, Coffee, Milk, Tea, Soda) → **Snack** → **Makanan Berat** (Ramen, Bento, Rice Bowl, Breakfast & Sandwich, Salad, Pasta) → **Pastry & Dessert**.
 - **Ukuran & penyajian:** minuman dingin punya pilihan Regular/Large. Menu yang tersedia panas dan dingin (Caffe Latte, Cappuccino, Americano, Mochaccino, Green Tea, Red Velvet) digabung jadi satu, dan fotonya ikut berganti saat memilih Hot.
 - **Pick Up:** pesan dan bayar dari ponsel, pilih jam ambil (secepatnya atau terjadwal), lalu ambil di counter pick-up tanpa antre dengan menyebut nama atau kode pesanan.
 - **Delivery:** kartu rute toko → alamat tujuan (jarak & status jangkauan, layar "Di Luar Jangkauan" bila lebih dari batas), cari alamat lewat Google Maps (saran alamat + peta) atau pakai lokasi pelanggan, pilih GoSend Instant atau GrabExpress Instant dengan estimasi ongkir dan waktu tiba, bayar online (termasuk ongkir), lalu pantau status sampai driver mengantar.
@@ -33,8 +41,9 @@ Semua data toko ada di `js/data.js`:
 
 | Bagian | Isi |
 | --- | --- |
-| `MG_CONFIG` | Nama, alamat, jam buka, WhatsApp, Instagram, peta, pajak, teks beranda, foto suasana, tarif & jangkauan delivery (`delivery`) |
-| `MG_MENU` | Kategori, menu, harga, dan pilihan (ukuran, gula, es) |
+| `MG_CONFIG` | Nama, alamat, jam buka, WhatsApp, Instagram, peta, pajak, teks beranda, foto suasana, tarif & jangkauan delivery (`delivery`), alamat server POS untuk menu pelanggan (`posServer`) |
+| `MG_GROUPS` | Kelompok menu dan urutannya: Minuman → Snack → Makanan Berat → Pastry & Dessert (harus sama dengan `pos/js/core/menu.js`; diperiksa tes) |
+| `MG_MENU` | Kategori (urut per kelompok), menu, harga, dan pilihan (ukuran, gula, es) |
 | `MG_BANNERS` | Banner di beranda dan kategori yang dibuka |
 
 Kalau Robucca menambahkan pajak/servis di kasir, isi `taxRate` (misalnya `0.10`) dan `taxLabel` (misalnya `"PB1 10%"`); harga dan ringkasan pembayaran akan menyesuaikan.

@@ -7,6 +7,7 @@ import { S, master, can } from '../../state.js';
 import { $, esc, icon, IMG, modal, drawer, toast, confirmBox, debounce, hydrateImgs } from '../../lib/ui.js';
 import { rp, parse } from '../../core/money.js';
 import { uuid } from '../../core/ids.js';
+import { MENU_GROUPS, groupOf, publicMenu } from '../../core/menu.js';
 import { pageHead, myBranches } from './common.js';
 
 const STATIONS = [['', 'Ikuti kategori'], ['bar', 'Bar'], ['kitchen', 'Dapur'], ['none', 'Tanpa dapur (langsung saji)']];
@@ -20,7 +21,7 @@ export async function mount(el) {
   let cat = 'all'; let q = '';
 
   el.innerHTML = `${pageHead('Menu & harga', owner ? 'Menu berlaku di semua cabang · atur ketersediaan & harga khusus per cabang' : 'Atur ketersediaan menu di cabang Anda',
-    `${owner ? `<button class="btn ghost sm" data-a="new-cat">${icon('plus', 'sm')} Kategori</button><button class="btn sm" data-a="new-item">${icon('plus', 'sm')} Menu baru</button>` : ''}`)}
+    `<button class="btn ghost sm" data-a="public">${icon('eye', 'sm')} Menu pelanggan</button>${owner ? `<button class="btn ghost sm" data-a="new-cat">${icon('plus', 'sm')} Kategori</button><button class="btn sm" data-a="new-item">${icon('plus', 'sm')} Menu baru</button>` : ''}`)}
     <div class="page">
       <div class="filters">
         <select class="select sm" data-branch aria-label="Cabang">${branches.map((b) => `<option value="${b.id}" ${b.id === bid ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>
@@ -80,9 +81,9 @@ export async function mount(el) {
       body: `<div class="col">
         <label class="field"><span>Nama kategori</span><input class="input" id="c-name" value="${esc(doc.name)}" autofocus></label>
         <label class="field"><span>Dikirim ke</span><select class="select" id="c-st">${CAT_STATIONS.map(([v, l]) => `<option value="${v}" ${doc.station === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-        <label class="field"><span>Kelompok</span><select class="select" id="c-gr">${[['food', 'Makanan'], ['snack', 'Snack, Pastry & Dessert'], ['drinks', 'Minuman']].map(([v, l]) => `<option value="${v}" ${doc.group === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="field"><span>Kelompok</span><select class="select" id="c-gr">${MENU_GROUPS.map((g) => `<option value="${g.id}" ${groupOf(doc) === g.id ? 'selected' : ''}>${g.name}</option>`).join('')}</select><small>Urutan tampil: ${MENU_GROUPS.map((g) => g.name).join(' → ')}</small></label>
         <label class="field"><span>Catatan cepat <em>(pisahkan dengan koma)</em></span><input class="input" id="c-notes" value="${esc((doc.notes || []).join(', '))}" placeholder="Tidak pedas, Saus dipisah"></label>
-        <label class="field"><span>Urutan</span><input class="input" id="c-sort" type="number" min="1" value="${doc.sort || 1}"></label>
+        <label class="field"><span>Urutan <em>(di dalam kelompok)</em></span><input class="input" id="c-sort" type="number" min="1" value="${doc.sort || 1}"></label>
         <div class="switch-row"><div class="grow"><b>Aktif</b><small>Kategori nonaktif disembunyikan dari kasir</small></div><button class="switch ${doc.active !== false ? 'on' : ''}" id="c-act" role="switch" aria-checked="${doc.active !== false}" aria-label="Aktif"></button></div>
       </div>`,
       foot: '<button class="btn ghost" data-close>Batal</button><button class="btn" data-ok>Simpan</button>',
@@ -194,6 +195,40 @@ export async function mount(el) {
     });
   }
 
+  /* ---------- menu pelanggan (/menu/): tautan untuk dibagikan / dicetak sebagai QR ---------- */
+  async function customerMenu() {
+    const m0 = master(); const b = m0.branch[bid];
+    if (!b) return;
+    const demo = S.be.isDemo;
+    const base = S.be.isServer && S.be.device.serverUrl ? `${S.be.device.serverUrl.replace(/\/+$/, '')}/menu/` : new URL('../menu/', location.href).href;
+    const link = new URL(base); link.searchParams.set('cabang', b.code);
+    const open = new URL(link);
+    if (demo) {
+      // data demo hanya ada di perangkat ini → kirim salinan menu cabang ke halaman pelanggan sebagai pratinjau
+      try {
+        const menu = publicMenu(m0.raw, bid, { stock: await S.be.stockLevels(bid) });
+        localStorage.setItem('pos:menuPreview', JSON.stringify({ at: Date.now(), org: { name: m0.settings.orgName, instagram: m0.settings.instagram }, branches: [], menu }));
+        open.searchParams.set('pratinjau', '1');
+      } catch (e) { toast(`Pratinjau tidak bisa disiapkan: ${e.message || e}`, 'warn'); }
+    }
+    const m = modal({
+      title: `Menu pelanggan · ${b.name}`, size: 'sm',
+      body: `<div class="col">
+        <p style="margin:0;font-size:13px;color:var(--ink-2)">Halaman menu untuk pelanggan, hanya untuk dilihat. Isinya diurutkan ${MENU_GROUPS.map((g) => g.name).join(' → ')}, memakai harga cabang ini, dan memberi tanda <b>Habis</b>. Bagikan tautannya atau cetak sebagai QR di meja.</p>
+        <label class="field"><span>Tautan menu ${esc(b.name)}</span><input class="input" id="cm-link" readonly value="${esc(link.href)}"></label>
+        ${demo ? `<div class="note">${icon('info', 'sm')}<span><b>Mode demo:</b> tautan di atas menampilkan menu standar, karena data demo hanya tersimpan di perangkat ini. Harga & stok cabang tampil otomatis setelah memakai server pusat. <b>Pratinjau</b> menunjukkan tampilan pelanggan dengan data demo cabang ini.</span></div>`
+          : '<p class="hint">Pastikan alamat server bisa dibuka dari internet (HTTPS) sebelum tautan dicetak sebagai QR.</p>'}
+      </div>`,
+      foot: `<button class="btn ghost" data-copy>${icon('copy', 'sm')} Salin tautan</button><a class="btn" href="${esc(open.href)}" target="_blank" rel="noopener">${icon(demo ? 'eye' : 'link', 'sm')} ${demo ? 'Pratinjau' : 'Buka'}</a>`,
+    });
+    m.el.addEventListener('click', async (e) => {
+      if (!e.target.closest('[data-copy]')) return;
+      const inp = $('#cm-link', m.el);
+      try { await navigator.clipboard.writeText(inp.value); } catch (er) { inp.select(); document.execCommand('copy'); }
+      toast('Tautan disalin');
+    });
+  }
+
   el.addEventListener('click', (e) => {
     const c = e.target.closest('[data-cat]'); if (c) { cat = c.dataset.cat; renderCats(); render(); return; }
     const av = e.target.closest('[data-avail]'); if (av) { toggleAvail(av.dataset.avail); return; }
@@ -202,6 +237,7 @@ export async function mount(el) {
     if (a.dataset.a === 'new-item') itemDrawer();
     if (a.dataset.a === 'new-cat') catDialog();
     if (a.dataset.a === 'edit-cat') catDialog(master().cat[cat]);
+    if (a.dataset.a === 'public') customerMenu();
   });
   el.addEventListener('change', (e) => { if (e.target.matches('[data-branch]')) { bid = e.target.value; sessionStorage.setItem('pos:menu:branch', bid); render(); } });
   el.addEventListener('input', debounce((e) => { if (e.target.matches('[data-q]')) { q = e.target.value; render(); } }, 150));

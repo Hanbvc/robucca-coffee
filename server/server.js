@@ -25,6 +25,7 @@ import { bizDate, addDays, dayDiff, TZS } from '../pos/js/core/dates.js';
 import { validBranchCode, uuid } from '../pos/js/core/ids.js';
 import { Master } from '../pos/js/data/master.js';
 import { generateHistory } from '../pos/js/data/demo.js';
+import { publicMenu, publicBranches } from '../pos/js/core/menu.js';
 
 export const VERSION = '1.0.0';
 const SESSION_MS = 12 * 3600e3;
@@ -95,6 +96,30 @@ export function createApp({ store, corsOrigins = [], log = console.log, trustPro
     return { from, to };
   }
   const needPerm = (staff, perm) => { if (!can(staff, perm)) throw forbid(); };
+
+  /* ---------- menu publik untuk pelanggan (tanpa login) ----------
+     Hanya data yang memang tampil di buku menu: nama, harga cabang, foto, habis/tidak.
+     Hasil disimpan sampai menu, stok, atau transaksi berubah. */
+  const menuCache = new Map();
+  function publicMenuRoute(res, u) {
+    const m = store.master();
+    const settings = m.settings[0] || {};
+    const org = { name: settings.orgName || 'Robucca', instagram: settings.instagram || '' };
+    const branches = publicBranches(m);
+    const code = String(u.searchParams.get('cabang') || '').trim().toUpperCase().slice(0, 8);
+    const headers = { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=15' };
+    let b = code ? m.branches.find((x) => x.code === code && x.active !== false) : null;
+    if (code && !b) return send(res, 404, { error: 'Cabang tidak ditemukan', org, branches }, headers);
+    if (!b && branches.length === 1) b = m.branches.find((x) => x.code === branches[0].code);
+    if (!b) return send(res, 200, { org, branches, menu: null, at: Date.now() }, headers);
+    const key = `${store.masterVersion()}:${store.seq}`;
+    let c = menuCache.get(b.id);
+    if (!c || c.key !== key) {
+      c = { key, menu: publicMenu(m, b.id, { stock: store.stockLevels(b.id) }) };
+      menuCache.set(b.id, c);
+    }
+    return send(res, 200, { org, branches, menu: c.menu, at: Date.now() }, headers);
+  }
 
   /* ---------- SSE ---------- */
   const sse = (res, event, data) => { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch (e) { /* koneksi putus */ } };
@@ -198,6 +223,8 @@ export function createApp({ store, corsOrigins = [], log = console.log, trustPro
     const seg = p.split('/').filter(Boolean); // ['api', ...]
 
     if (p === '/api/health') return send(res, 200, { ok: true, app: 'robucca-pos', version: VERSION, time: Date.now() });
+
+    if (p === '/api/public/menu' && M === 'GET') return publicMenuRoute(res, u);
 
     if (p === '/api/pair' && M === 'POST') {
       const ip = ipOf(req);

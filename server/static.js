@@ -1,4 +1,4 @@
-/* Penyaji berkas statis aplikasi POS. Hanya folder yang diizinkan yang bisa diakses
+/* Penyaji berkas statis aplikasi POS & menu pelanggan. Hanya folder yang diizinkan yang bisa diakses
    (database, kode server, dan berkas lain di repo tidak pernah disajikan). */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,7 +8,7 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webp': 'image/webp', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
 };
-const ALLOW = ['/pos/', '/assets/', '/js/data.js'];
+const ALLOW = ['/pos/', '/menu/', '/assets/', '/js/data.js'];
 const NO_CACHE = new Set(['.html', '.js', '.mjs', '.css', '.json', '.webmanifest']);
 
 export const CSP = [
@@ -19,7 +19,7 @@ export const CSP = [
 export function serveStatic(root, req, res, urlPath) {
   let p;
   try { p = decodeURIComponent(urlPath); } catch (e) { return false; }
-  if (p === '/pos') { res.writeHead(301, { Location: '/pos/' }); res.end(); return true; }
+  if (p === '/pos' || p === '/menu') { res.writeHead(301, { Location: `${p}/` }); res.end(); return true; }
   if (p.endsWith('/')) p += 'index.html';
   const allowed = (x) => ALLOW.some((a) => (a.endsWith('/') ? x.startsWith(a) : x === a));
   if (p.includes('\0') || !allowed(p)) return false;

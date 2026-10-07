@@ -190,6 +190,56 @@ test('hak data master per peran', async () => {
   assert.equal((await call('DELETE', '/api/master/branches/br-ijn', { token: T.hq, session: T.owner })).status, 400, 'cabang tidak dihapus, hanya dinonaktifkan');
 });
 
+test('menu publik pelanggan: tanpa login, urutan kelompok, harga & habis per cabang, tanpa data internal', async () => {
+  // dua cabang aktif → tanpa kode cabang: daftar pilihan
+  const pick = await call('GET', '/api/public/menu');
+  assert.equal(pick.status, 200);
+  assert.equal(pick.body.menu, null);
+  assert.deepEqual(pick.body.branches.map((b) => b.code).sort(), ['CB2', 'IJN']);
+  assert.equal(pick.headers.get('access-control-allow-origin'), '*');
+
+  const r = await call('GET', '/api/public/menu?cabang=ijn');
+  assert.equal(r.status, 200);
+  const m = r.body.menu;
+  assert.equal(m.branch.code, 'IJN');
+  assert.deepEqual(m.groups.map((g) => g.name), ['Minuman', 'Snack', 'Makanan Berat', 'Pastry & Dessert']);
+  const flat = (menu) => menu.groups.flatMap((g) => g.cats.flatMap((c) => c.items));
+  assert.equal(flat(m).length, 95);
+  assert.equal(flat(m).find((i) => i.id === 'truffle-fries').soldOut, true, 'ditandai habis oleh kasir IJN');
+  assert.match(m.priceNote, /sudah termasuk PB1 10%/);
+  const text = JSON.stringify(r.body);
+  for (const k of ['"pin"', '"staff', 'pbkdf2$', '"token', '"track"', '"low"', '"station"', '"devices', '"discounts']) assert.ok(!text.includes(k), `data internal bocor: ${k}`);
+
+  // harga khusus cabang langsung terlihat setelah diubah (hasil tersimpan ikut diperbarui)
+  const before = flat((await call('GET', '/api/public/menu?cabang=CB2')).body.menu).find((i) => i.id === 'kopi-susu-essentials');
+  assert.equal(before.price, 24000);
+  const ov = { id: 'br-cb2:kopi-susu-essentials', branchId: 'br-cb2', itemId: 'kopi-susu-essentials', price: 26500, available: true };
+  assert.equal((await call('PUT', '/api/master/itemBranch', { token: T.hq, session: T.owner, body: ov })).status, 200);
+  const c2 = (await call('GET', '/api/public/menu?cabang=CB2')).body.menu;
+  assert.equal(flat(c2).find((i) => i.id === 'kopi-susu-essentials').price, 26500);
+  assert.equal(flat(c2).find((i) => i.id === 'truffle-fries').soldOut, false, 'habis hanya di IJN');
+  assert.match(c2.priceNote, /belum termasuk PBJT 10%\. Biaya layanan 5%/);
+
+  // kode salah & cabang nonaktif → 404 berisi daftar cabang
+  const bad = await call('GET', '/api/public/menu?cabang=ZZZ');
+  assert.equal(bad.status, 404);
+  assert.ok(Array.isArray(bad.body.branches));
+  const cb2 = store.master().branches.find((b) => b.id === 'br-cb2');
+  assert.equal((await call('PUT', '/api/master/branches', { token: T.hq, session: T.owner, body: { ...cb2, active: false } })).status, 200);
+  assert.equal((await call('GET', '/api/public/menu?cabang=CB2')).status, 404);
+  const one = await call('GET', '/api/public/menu');
+  assert.equal(one.body.menu.branch.code, 'IJN', 'satu cabang aktif → langsung menunya');
+  assert.equal((await call('PUT', '/api/master/branches', { token: T.hq, session: T.owner, body: { ...cb2, active: true } })).status, 200);
+
+  // halaman menu disajikan dengan CSP; /menu dialihkan ke /menu/
+  const page = await fetch(`${base}/menu/`);
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get('content-security-policy'), /connect-src 'self'/);
+  const redir = await fetch(`${base}/menu`, { redirect: 'manual' });
+  assert.equal(redir.status, 301);
+  for (const f of ['/menu/menu.js', '/menu/menu.css', '/pos/js/core/menu.js']) assert.equal((await fetch(base + f)).status, 200, f);
+});
+
 test('jalur kantor: refund dari pusat, log harus atas nama sendiri', async () => {
   const o = T.order;
   const refund = {

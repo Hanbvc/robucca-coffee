@@ -1,6 +1,7 @@
 /* Data master (menu, cabang, staf, dll.) dengan indeks siap pakai untuk tampilan. */
 import { defaultSettings } from '../core/seed.js';
 import { branchPrice, isAvailable } from '../core/calc.js';
+import { byMenuOrder } from '../core/menu.js';
 
 const bySort = (a, b) => (a.sort ?? 999) - (b.sort ?? 999) || String(a.name).localeCompare(String(b.name), 'id');
 const map = (arr) => Object.fromEntries(arr.map((x) => [x.id, x]));
@@ -11,7 +12,7 @@ export class Master {
     this.settings = { ...defaultSettings(), ...(raw.settings && raw.settings[0]) };
     this.branches = [...raw.branches].sort((a, b) => String(a.name).localeCompare(String(b.name), 'id'));
     this.branch = map(raw.branches);
-    this.categories = [...raw.categories].sort(bySort);
+    this.categories = [...raw.categories].sort(byMenuOrder); // Minuman → Snack → Makanan Berat → Pastry & Dessert
     this.cat = map(raw.categories);
     const catSort = Object.fromEntries(this.categories.map((c, i) => [c.id, i]));
     this.items = [...raw.items].sort((a, b) => (catSort[a.catId] ?? 999) - (catSort[b.catId] ?? 999) || bySort(a, b));

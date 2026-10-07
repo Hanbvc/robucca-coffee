@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Menu Robucca</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="description" content="Menu Robucca: minuman, snack, makanan berat, serta pastry & dessert — harga dan ketersediaan per cabang." />
+  <meta name="theme-color" content="#FAEEDA" />
+  <meta name="color-scheme" content="light" />
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
+  <link rel="icon" type="image/png" href="../assets/brand/favicon.png" />
+  <link rel="apple-touch-icon" href="../assets/brand/apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Londrina+Solid:wght@400;900&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="menu.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <div class="brand"><img src="../assets/brand/wordmark-dark.png" alt="Robucca" width="80" height="40" /><span class="proto" id="proto" hidden>Prototipe</span></div>
+      <div class="where" id="where"></div>
+    </div>
+  </header>
+
+  <div class="bar" id="bar" hidden>
+    <div class="wrap">
+      <div class="row1">
+        <nav class="tabs" id="tabs" aria-label="Kelompok menu"></nav>
+        <button class="icon-btn" id="search-open" aria-label="Cari menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+      </div>
+      <nav class="chips" id="chips" aria-label="Kategori"></nav>
+      <div class="search" role="search">
+        <label class="sr-only" for="q">Cari menu</label>
+        <input id="q" type="search" placeholder="Cari kopi, ramen, croissant…" autocomplete="off" enterkeyhint="search" />
+        <button id="search-close" type="button">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="wrap" id="main">
+    <div class="loading" id="loading"><i></i>Memuat menu…</div>
+    <div id="list"></div>
+    <div id="results" hidden></div>
+  </main>
+  <footer class="foot wrap" id="foot"></footer>
+
+  <noscript><p style="padding:24px;text-align:center">Aktifkan JavaScript untuk melihat menu.</p></noscript>
+  <!-- Menu standar (sama dengan aplikasi pemesanan); dipakai bila server POS tidak tersedia -->
+  <script src="../js/data.js"></script>
+  <script type="module" src="menu.js"></script>
+</body>
+</html>

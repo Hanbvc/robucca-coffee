@@ -13,6 +13,8 @@ import { validate } from '../pos/js/core/validate.js';
 import { can, canBranch, staffForBranch, assignableRoles } from '../pos/js/core/perms.js';
 import { seedMaster, menuFromData } from '../pos/js/core/seed.js';
 import { loadCustomerData } from '../server/data-loader.js';
+import { MENU_GROUPS, groupOf, byMenuOrder, publicMenu, optionNotes, priceNote } from '../pos/js/core/menu.js';
+import { Master } from '../pos/js/data/master.js';
 
 const hex = (u8) => Buffer.from(u8).toString('hex');
 
@@ -311,4 +313,69 @@ test('data awal dari js/data.js', async () => {
   const d = await seedMaster({ MENU, CONFIG, demo: true });
   assert.equal(d.branches.length, 3);
   assert.ok(d.staff.length >= 9);
+});
+
+/* ---------------- urutan kelompok & menu pelanggan ---------------- */
+test('urutan kelompok sama di js/data.js & POS: Minuman → Snack → Makanan Berat → Pastry & Dessert', () => {
+  const { MENU, GROUPS } = loadCustomerData();
+  assert.deepEqual(GROUPS, MENU_GROUPS);
+  assert.deepEqual(MENU_GROUPS.map((g) => g.name), ['Minuman', 'Snack', 'Makanan Berat', 'Pastry & Dessert']);
+  // kategori di MG_MENU tersusun per kelompok sesuai urutan → chip kategori searah dengan bagian menu
+  const seq = MENU.map((c) => MENU_GROUPS.findIndex((g) => g.id === c.group));
+  assert.ok(seq.every((x) => x >= 0), 'setiap kategori punya kelompok yang dikenal');
+  assert.deepEqual(seq, [...seq].sort((a, b) => a - b));
+  assert.deepEqual(MENU.filter((c) => c.group === 'pastry').map((c) => c.id), ['pastry', 'dessert']);
+});
+
+test('data POS lama: pastry & dessert di kelompok snack tetap tampil paling akhir', () => {
+  // kelompok & nomor urut versi sebelumnya: makanan → snack/pastry/dessert → minuman
+  const old = [['ramen', 'food'], ['pasta', 'food'], ['snack', 'snack'], ['pastry', 'snack'], ['dessert', 'snack'], ['coffee', 'drinks'], ['tea', 'drinks']]
+    .map(([id, group], i) => ({ id, name: id, group, sort: i + 1 }));
+  assert.equal(groupOf(old[3]), 'pastry');
+  assert.equal(groupOf(old[2]), 'snack');
+  assert.equal(groupOf({ id: 'x', group: '' }), 'other');
+  const m = new Master({ settings: [], branches: [], categories: old, items: [], itemBranch: [], channels: [], payMethods: [], discounts: [], staff: [] });
+  assert.deepEqual(m.categories.map((c) => c.id), ['coffee', 'tea', 'snack', 'ramen', 'pasta', 'pastry', 'dessert']);
+  assert.equal([...old, { id: 'baru', name: 'Baru', group: 'zzz', sort: 0 }].sort(byMenuOrder).at(-1).id, 'baru', 'kelompok tak dikenal di akhir');
+});
+
+test('menu publik: harga cabang, habis, stok, opsi berharga, pajak', () => {
+  const { MENU } = loadCustomerData();
+  const { categories, items } = menuFromData(MENU, { demo: true }); // pastry & dessert stoknya dilacak
+  const raw = {
+    settings: [{ id: 'org', blockNoStock: true }],
+    branches: [{ id: 'b1', code: 'B1', name: 'Satu', taxPct: 10, taxIncl: true, servicePct: 0, taxLabel: 'PB1', active: true }, { id: 'b2', code: 'B2', name: 'Dua', active: false }],
+    categories: categories.map((c) => (c.id === 'salad' ? { ...c, active: false } : c)),
+    items: items.map((i) => (i.id === 'takoyaki' ? { ...i, active: false } : i)),
+    itemBranch: [{ id: 'b1:americano', branchId: 'b1', itemId: 'americano', price: 17500 }, { id: 'b1:gyu-don', branchId: 'b1', itemId: 'gyu-don', available: false }],
+    channels: [{ id: 'dinein', type: 'dinein', markupPct: 0, active: true }],
+  };
+  const pm = publicMenu(raw, 'b1', { stock: { 'almond-croissant': 0, 'croissant-plain': 4 } });
+  const all = pm.groups.flatMap((g) => g.cats.flatMap((c) => c.items));
+  const get = (id) => all.find((i) => i.id === id);
+  assert.deepEqual(pm.groups.map((g) => g.id), ['drinks', 'snack', 'food', 'pastry']);
+  assert.deepEqual(pm.groups[0].cats.map((c) => c.id), ['essentials', 'signature', 'coffee', 'milk', 'tea', 'soda']);
+  assert.equal(get('americano').price, 17500, 'harga khusus cabang');
+  assert.equal(get('caffe-latte').price, 19000);
+  assert.deepEqual(get('americano').notes, ['Iced · Large +4.000', 'Hot +2.000']);
+  assert.deepEqual(get('mochaccino').notes, ['Iced · Large +4.000', 'Hot']);
+  assert.deepEqual(get('mango-tea').notes, ['Large +4.000'], 'level gula & es tidak ditampilkan');
+  assert.deepEqual(get('kopi-kelapa').notes, []);
+  assert.equal(get('gyu-don').soldOut, true, 'ditandai habis di cabang');
+  assert.equal(get('almond-croissant').soldOut, true, 'stok 0');
+  assert.equal(get('croissant-plain').soldOut, false);
+  assert.equal(get('matcha-croissant').soldOut, true, 'dilacak tanpa catatan stok = 0');
+  assert.equal(get('takoyaki'), undefined, 'menu nonaktif disembunyikan');
+  assert.ok(!pm.groups.some((g) => g.cats.some((c) => c.id === 'salad')), 'kategori nonaktif disembunyikan');
+  assert.equal(pm.priceNote, 'Harga sudah termasuk PB1 10%.');
+  assert.deepEqual(Object.keys(pm.branch).sort(), ['address', 'close', 'code', 'name', 'open', 'phone', 'tz']);
+  assert.equal(publicMenu(raw, 'b2'), null, 'cabang nonaktif');
+  // tanpa blokir stok: menu dilacak tetap tersedia; markup kanal dine-in ikut dihitung
+  const pm2 = publicMenu({ ...raw, settings: [{ blockNoStock: false }], channels: [{ id: 'dinein', type: 'dinein', markupPct: 10, active: true }] }, 'b1', { stock: {} });
+  const a2 = pm2.groups.flatMap((g) => g.cats.flatMap((c) => c.items));
+  assert.equal(a2.find((i) => i.id === 'almond-croissant').soldOut, false);
+  assert.equal(a2.find((i) => i.id === 'americano').price, channelPrice(17500, 10));
+  assert.equal(priceNote({ taxPct: 11, taxIncl: false, servicePct: 5, taxLabel: 'PBJT' }), 'Harga belum termasuk PBJT 11%. Biaya layanan 5% ditambahkan saat pembayaran.');
+  assert.equal(priceNote({ taxPct: 0 }), '');
+  assert.deepEqual(optionNotes([{ id: 'x', type: 'multi', choices: [{ n: 'Extra shot', p: 5000 }, { n: 'Oat milk', p: 6000 }] }]), ['Extra shot +5.000', 'Oat milk +6.000']);
 });
