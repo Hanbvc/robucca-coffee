@@ -28,15 +28,16 @@ PIN demo: Pemilik **1111** · Manajer **2222** · Kasir **3333 / 3344** · Dapur
 - **Shift kas**: kas awal, kas masuk/keluar, tutup shift dengan hitung pecahan, selisih kas wajib dijelaskan, laporan shift.
 - Stok menu yang dilacak (pastry/dessert) berkurang otomatis; menu habis tidak bisa dijual (bisa dimatikan).
 
-**Dapur/Bar & antrean**
+**Dapur/Bar, antrean & menu pelanggan**
 - Tiket per pesanan, filter Bar/Dapur, tandai selesai per item atau per tiket, pesanan tambahan ditandai, item batal dicoret, warna kuning/merah bila menunggu terlalu lama, bunyi tiket baru, kembalikan tiket.
 - Layar antrean pelanggan: “Sedang disiapkan” & “Siap diambil”.
+- **Menu pelanggan** (`/menu/?cabang=KODE`), hanya untuk dilihat: QR di meja, tablet, atau TV. Isinya diurutkan Minuman → Snack → Makanan Berat → Pastry & Dessert, memakai harga & tanda **Habis** cabang itu (ditandai kasir, atau stok 0), dan diperbarui tiap menit. Datanya dari API publik `GET /api/public/menu?cabang=KODE`, yang tidak memuat data internal (staf, PIN, jumlah stok, pengaturan). Tautan per cabang ada di Kantor › Menu & harga › **Menu pelanggan**.
 
 **Kantor (pemilik semua cabang, manajer cabangnya sendiri)**
 - Dasbor: omzet, transaksi, rata-rata, item, diskon, pajak, void — dibanding periode sebelumnya (hari ini dibanding kemarin **sampai jam yang sama**), tren per hari/jam, omzet per cabang, jam ramai, metode bayar, tipe pesanan, kategori, menu terlaris, kondisi tiap cabang hari ini.
 - Laporan: ringkasan, per menu, kategori, pembayaran, tipe pesanan, kasir, harian & pajak (DPP), per cabang, void & refund — ekspor CSV (pemisah `;` agar rapi di Excel Indonesia) & cetak.
 - Transaksi semua cabang (cari, filter, detail struk, refund dari kantor), rekap shift & selisih kas.
-- Menu & harga: satu menu pusat, harga khusus & ketersediaan per cabang, opsi menu, stasiun dapur, pelacakan stok.
+- Menu & harga: satu menu pusat, harga khusus & ketersediaan per cabang, opsi menu, stasiun dapur, pelacakan stok. Kategori selalu tampil per kelompok **Minuman → Snack → Makanan Berat → Pastry & Dessert**; isian “Urutan” mengatur urutan di dalam kelompoknya.
 - Stok per cabang: stok masuk, opname, barang rusak, **transfer antarcabang**, riwayat pergerakan.
 - Promo (per cabang & periode), cabang (pajak, biaya layanan, zona WIB/WITA/WIT, jam pergantian hari, lebar kertas), karyawan & PIN, perangkat, pengaturan, **log aktivitas** (void, refund, diskon disetujui, shift, kas, stok, perubahan data).
 
@@ -66,7 +67,7 @@ PIN demo: Pemilik **1111** · Manajer **2222** · Kasir **3333 / 3344** · Dapur
 Butuh **Node.js 22.13 atau lebih baru** (memakai `node:sqlite` bawaan; diuji di Node 22.22). Tidak ada `npm install` yang diperlukan.
 
 ```bash
-npm start                    # http://localhost:8787/pos/ , database di ./data/robucca-pos.db
+npm start                    # http://localhost:8787/pos/ (kasir & kantor) dan /menu/ (menu pelanggan), database di ./data/robucca-pos.db
 npm run start:demo           # sama, tapi diisi 3 cabang contoh + data simulasi (untuk latihan)
 ```
 
@@ -146,7 +147,7 @@ Struk dicetak lewat dialog print browser, sehingga bekerja dengan printer therma
 ## Pengujian
 
 ```bash
-npm test             # 41 tes: perhitungan pajak/diskon/pembulatan, laporan, validasi, server (perangkat, sesi, sinkron, hak akses, SSE), service worker
+npm test             # 46 tes: perhitungan pajak/diskon/pembulatan, urutan kelompok & menu pelanggan, laporan, validasi, server (perangkat, sesi, sinkron, hak akses, SSE, menu publik), service worker
 npm run test:e2e     # alur di browser: demo (jual, tagihan, dapur, void, tutup shift, dasbor) + server multi-perangkat
                      # butuh: npm i -D playwright && npx playwright install chromium
 ```
@@ -156,16 +157,17 @@ npm run test:e2e     # alur di browser: demo (jual, tagihan, dapur, void, tutup 
 ```
 pos/
   index.html, sw.js, css/pos.css
-  js/core/        logika bisnis bersama browser & server (harga, pajak, laporan, validasi, PIN, hak akses)
+  js/core/        logika bisnis bersama browser & server (harga, pajak, kelompok & urutan menu, laporan, validasi, PIN, hak akses)
   js/data/        IndexedDB, backend demo/server, sinkronisasi, data contoh
   js/views/       kasir, tagihan, riwayat, shift, dapur, antrean, kantor/*
   js/components/  struk, persetujuan manajer, grafik, numpad
+menu/             menu pelanggan (hanya lihat): index.html, menu.js, menu.css
 server/
   server.js       API, SSE, CLI      store.js  SQLite      auth.js  token & pembatas      static.js  berkas statis
 tests/            node:test + tes browser (tests/e2e/run.js)
 ```
 
-Menu awal diambil dari `js/data.js` (sama dengan aplikasi pemesanan pelanggan). Setelah POS disiapkan, menu dikelola di Kantor › Menu & harga; aplikasi pelanggan masih membaca `js/data.js` sampai keduanya dihubungkan.
+Menu awal diambil dari `js/data.js` (sama dengan aplikasi pemesanan pelanggan). Setelah POS disiapkan, menu dikelola di Kantor › Menu & harga. Menu pelanggan (`/menu/`) membaca data POS bila dibuka dari server; aplikasi pemesanan masih membaca `js/data.js` sampai keduanya dihubungkan.
 
 ## Keamanan
 

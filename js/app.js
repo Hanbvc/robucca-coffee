@@ -882,7 +882,7 @@
         <div id="pd-opts">${optsHTML()}</div>
         <div class="notes bg-in">
           <b>Catatan <span class="faint" style="font-weight:400">(opsional)</span></b>
-          <textarea class="textarea" id="pd-note" maxlength="120" placeholder="Contoh: ${cat.group === 'food' ? 'tidak pakai daun bawang' : 'es dipisah'}">${esc(st.note)}</textarea>
+          <textarea class="textarea" id="pd-note" maxlength="120" placeholder="Contoh: ${cat.group === 'drinks' ? 'es dipisah' : cat.group === 'pastry' ? 'dibungkus terpisah' : 'tidak pakai daun bawang'}">${esc(st.note)}</textarea>
           ${notes.length ? `<div class="hscroll">${notes.map((n) => `<button class="chip sm" data-s="note" data-v="${esc(n)}">+ ${esc(n)}</button>`).join('')}</div>` : ''}
         </div>
       </div>

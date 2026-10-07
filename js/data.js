@@ -45,9 +45,9 @@ window.MG_CONFIG = {
     text: "Robucca di kawasan Ijen Nirwana, Malang — tempat untuk sarapan, makan siang, nongkrong, atau kerja, dari pagi sampai malam.",
   },
   storyImgs: [["venue-essentials", 300], ["venue-table", 220], ["gyu-don", 170], ["tantan-creamy-ramen", 170], ["almond-croissant", 170]],
-  homeCats: [
-    ["ramen", "Ramen", "shoyu-ramen"], ["bento", "Bento", "chicken-karaage-sambal-matah"], ["donburi", "Rice Bowl", "gyu-don"], ["snack", "Snack", "truffle-fries"],
-    ["pastry", "Pastry", "almond-croissant"], ["dessert", "Dessert", "classic-tiramisu"], ["coffee", "Coffee", "ice-caffe-latte"], ["milk", "Milk Based", "matcha-berry-latte"],
+  homeCats: [   // urutan: minuman → snack → makanan berat → pastry & dessert
+    ["coffee", "Coffee", "ice-caffe-latte"], ["milk", "Milk Based", "matcha-berry-latte"], ["snack", "Snack", "truffle-fries"], ["ramen", "Ramen", "shoyu-ramen"],
+    ["bento", "Bento", "chicken-karaage-sambal-matah"], ["donburi", "Rice Bowl", "gyu-don"], ["pastry", "Pastry", "almond-croissant"], ["dessert", "Dessert", "classic-tiramisu"],
   ],
   areas: [
     { v: "Indoor", img: "venue-cups", sub: "Ruang dalam" },
@@ -82,6 +82,10 @@ window.MG_CONFIG = {
      Batasi key ke domain situs (HTTP referrer), mis. https://hanbvc.github.io/* dan http://localhost:5174/*. */
   googleMapsKey: "AIzaSyDvD20XVSsglIhWY24PgQ7VUquGabmgn_E",
   sigCat: "signature",                 // kategori yang dibuka tombol "Lihat menu" di bagian Signature
+  /* Alamat server POS (mis. "https://pos.robucca.id"). Diisi agar menu pelanggan (/menu/) di GitHub Pages
+     memakai harga & ketersediaan per cabang dari POS. Kosong = menu standar dari file ini.
+     Bila /menu/ dibuka dari server POS sendiri, server itu otomatis dipakai. */
+  posServer: "",
 };
 
 /* ---------- Grup opsi ---------- */
@@ -100,95 +104,20 @@ const FOOD_NOTES = ["Tidak pedas", "Extra pedas", "Tanpa sayur", "Saus dipisah"]
 const DRINK_NOTES = ["Tanpa topping", "Pisah es"];
 
 /* ---------- Kategori & menu ---------- */
+/* Urutan kelompok = urutan tampil di aplikasi pemesanan, menu pelanggan (/menu/), dan POS.
+   Harus sama dengan MENU_GROUPS di pos/js/core/menu.js (diperiksa tes). */
 window.MG_GROUPS = [
-  { id: "food", name: "Makanan" },
-  { id: "snack", name: "Snack, Pastry & Dessert" },
   { id: "drinks", name: "Minuman" },
+  { id: "snack", name: "Snack" },
+  { id: "food", name: "Makanan Berat" },
+  { id: "pastry", name: "Pastry & Dessert" },
 ];
 
 const LARGE = 4000; // selisih harga ukuran Large di seluruh buku menu
 const iced = [size(LARGE), SUGAR, ICE_ALWAYS];
 
 window.MG_MENU = [
-  { id: "ramen", group: "food", name: "Ramen", notes: FOOD_NOTES, items: [
-    { id: "shoyu-ramen", name: "Shoyu Ramen", price: 35000 },
-    { id: "tantan-creamy-ramen", name: "Tantan Creamy Ramen", price: 40000 },
-    { id: "dry-yaki-ramen", name: "Dry Yaki Ramen", price: 38000 },
-    { id: "sambel-matah-karaage-ramen", name: "Sambel Matah Karaage Ramen", price: 35000, img: "sambel-matah-kaarage-ramen" },
-    { id: "spicy-chicken-ramen", name: "Spicy Chicken Ramen", price: 37000 },
-    { id: "katsu-curry-ramen", name: "Katsu Curry Ramen", price: 35000 },
-    { id: "miso-ramen-katsu-chicken", name: "Miso Ramen Katsu Chicken", price: 39000 },
-    { id: "tori-paitan-ramen", name: "Tori Paitan Ramen", price: 37000 },
-  ]},
-  { id: "bento", group: "food", name: "Bento", notes: FOOD_NOTES, items: [
-    { id: "butter-soya-soseji-bento", name: "Butter Soya Soseji Bento", price: 28000 },
-    { id: "spicy-soseji-bento", name: "Spicy Soseji Bento", price: 30000 },
-    { id: "chicken-karaage-sambal-matah", name: "Chicken Karaage Sambal Matah", price: 30000 },
-    { id: "chicken-karaage-mozzato", name: "Chicken Karaage Mozzato", price: 30000 },
-    { id: "chicken-karaage-spicy-cheese-bento", name: "Chicken Karaage Spicy Cheese Bento", price: 30000 },
-    { id: "chicken-karaage-butter-soya-bento", name: "Chicken Karaage Butter Soya Bento", price: 30000, img: "chicken-kaarage-butter-soya-bento" },
-    { id: "gochujang-fire-chicken", name: "Gochujang Fire Chicken", price: 32000, img: "gochunjang-fire-chicken" },
-  ]},
-  { id: "donburi", group: "food", name: "Rice Bowl", sub: "Donburi & curry", notes: FOOD_NOTES, items: [
-    { id: "gyu-don", name: "Gyu Don", price: 40000 },
-    { id: "gyu-tan-don", name: "Gyu Tan Don", price: 40000 },
-    { id: "chicken-katsudon", name: "Chicken Katsudon", price: 31000 },
-    { id: "karaage-egg-mayo-don", name: "Karaage Egg Mayo Don", price: 32000 },
-    { id: "chicken-katsu-curry", name: "Chicken Katsu Curry", price: 38000 },
-  ]},
-  { id: "breakfast", group: "food", name: "Breakfast & Sandwich", notes: FOOD_NOTES, items: [
-    { id: "sourdough-full-breakfast", name: "Sourdough Full Breakfast", price: 40000 },
-    { id: "french-full-breakfast", name: "French Full Breakfast", price: 42000 },
-    { id: "blt-sourdough-sandwich", name: "BLT Sourdough Sandwich", price: 39000 },
-    { id: "spicy-oriental-sourdough-sandwich", name: "Spicy Oriental Sourdough Sandwich", price: 39000 },
-  ]},
-  { id: "salad", group: "food", name: "Salad", notes: FOOD_NOTES, items: [
-    { id: "sesame-dressing-japanese-salad", name: "Sesame Dressing Japanese Salad", price: 37000 },
-    { id: "ham-and-cheese-italian-salad", name: "Ham and Cheese Italian Salad", price: 37000 },
-  ]},
-  { id: "pasta", group: "food", name: "Pasta", notes: FOOD_NOTES, items: [
-    { id: "pasta-aglio-olio", name: "Pasta Aglio Olio", price: 30000, img: "pasta-oglio-olio" },
-    { id: "cheesy-pasta", name: "Cheesy Pasta", price: 31000 },
-  ]},
-
-  { id: "snack", group: "snack", name: "Snack", notes: FOOD_NOTES, items: [
-    { id: "truffle-fries", name: "Truffle Fries", price: 27000 },
-    { id: "french-fries", name: "French Fries", price: 20000 },
-    { id: "potato-wedges", name: "Potato Wedges", price: 20000 },
-    { id: "aromatic-garlic-fries", name: "Aromatic Garlic Fries", price: 24000 },
-    { id: "fries-gravy-moza", name: "Fries Gravy Moza", price: 30000 },
-    { id: "chicken-karaage", name: "Chicken Karaage", price: 22000 },
-    { id: "takoyaki", name: "Takoyaki", price: 28000 },
-    { id: "aburage-chicken-roll", name: "Aburage Chicken Roll", price: 26000 },
-    { id: "shrimp-sando", name: "Shrimp Sando", price: 27000 },
-    { id: "chicken-katsu-sando", name: "Chicken Katsu Sando", price: 30000 },
-    { id: "egg-sando", name: "Egg Sando", price: 28000 },
-    { id: "thai-pandan-toast", name: "Thai Pandan Toast", price: 20000 },
-    { id: "thai-caramel-toast", name: "Thai Caramel Toast", price: 20000 },
-    { id: "salt-edamame", name: "Salt Edamame", price: 19000 },
-    { id: "spicy-garlic-edamame", name: "Spicy Garlic Edamame", price: 24000 },
-  ]},
-  { id: "pastry", group: "snack", name: "Pastry", sub: "Croissant & crookies", items: [
-    { id: "croissant-plain", name: "Croissant Plain", price: 15500 },
-    { id: "croissant-cheese", name: "Croissant Cheese", price: 24000 },
-    { id: "almond-croissant", name: "Almond Croissant", price: 32000 },
-    { id: "matcha-croissant", name: "Matcha Croissant", price: 27000 },
-    { id: "red-velvet-croissant", name: "Red Velvet Croissant", price: 27000 },
-    { id: "double-chocolate-croissant", name: "Double Chocolate Croissant", price: 27000 },
-    { id: "croissant-piscok", name: "Croissant Piscok", price: 30000 },
-    { id: "pain-au-chocolate", name: "Pain au Chocolate", price: 20000 },
-    { id: "crookies-chocolate", name: "Crookies Chocolate", price: 30000 },
-  ]},
-  { id: "dessert", group: "snack", name: "Dessert", sub: "Misu, cheesecake & cookies", items: [
-    { id: "classic-tiramisu", name: "Classic Tiramisu", price: 42000 },
-    { id: "matcha-misu", name: "Matcha Misu", price: 42000 },
-    { id: "cookies-misu", name: "Cookies Misu", price: 30000 },
-    { id: "new-york-cheesecake", name: "New York Cheesecake", price: 31000 },
-    { id: "cheesecake-biscoff", name: "Cheesecake Biscoff", price: 32000 },
-    { id: "cookies-chocolate", name: "Cookies Chocolate", price: 20000 },
-    { id: "cookies-matcha", name: "Cookies Matcha", price: 20000 },
-  ]},
-
+  /* ---- Minuman ---- */
   { id: "essentials", group: "drinks", name: "Robucca Essentials", sig: true, notes: DRINK_NOTES, items: [
     { id: "kopi-susu-essentials", name: "Kopi Susu Essentials", price: 24000, sig: true, opts: [SUGAR, ICE_ALWAYS] },
     { id: "kopi-kelapa", name: "Kopi Kelapa", price: 26000, sig: true, opts: [SUGAR, ICE_ALWAYS] },
@@ -236,6 +165,89 @@ window.MG_MENU = [
     { id: "orange-soda-americano", name: "Orange Soda Americano", price: 22000, opts: iced },
     { id: "summer-breeze", name: "Summer Breeze", price: 22000, opts: iced },
     { id: "strawberry-basil-bubble", name: "Strawberry Basil Bubble", price: 25000, opts: iced },
+  ]},
+
+  /* ---- Snack ---- */
+  { id: "snack", group: "snack", name: "Snack", notes: FOOD_NOTES, items: [
+    { id: "truffle-fries", name: "Truffle Fries", price: 27000 },
+    { id: "french-fries", name: "French Fries", price: 20000 },
+    { id: "potato-wedges", name: "Potato Wedges", price: 20000 },
+    { id: "aromatic-garlic-fries", name: "Aromatic Garlic Fries", price: 24000 },
+    { id: "fries-gravy-moza", name: "Fries Gravy Moza", price: 30000 },
+    { id: "chicken-karaage", name: "Chicken Karaage", price: 22000 },
+    { id: "takoyaki", name: "Takoyaki", price: 28000 },
+    { id: "aburage-chicken-roll", name: "Aburage Chicken Roll", price: 26000 },
+    { id: "shrimp-sando", name: "Shrimp Sando", price: 27000 },
+    { id: "chicken-katsu-sando", name: "Chicken Katsu Sando", price: 30000 },
+    { id: "egg-sando", name: "Egg Sando", price: 28000 },
+    { id: "thai-pandan-toast", name: "Thai Pandan Toast", price: 20000 },
+    { id: "thai-caramel-toast", name: "Thai Caramel Toast", price: 20000 },
+    { id: "salt-edamame", name: "Salt Edamame", price: 19000 },
+    { id: "spicy-garlic-edamame", name: "Spicy Garlic Edamame", price: 24000 },
+  ]},
+
+  /* ---- Makanan Berat ---- */
+  { id: "ramen", group: "food", name: "Ramen", notes: FOOD_NOTES, items: [
+    { id: "shoyu-ramen", name: "Shoyu Ramen", price: 35000 },
+    { id: "tantan-creamy-ramen", name: "Tantan Creamy Ramen", price: 40000 },
+    { id: "dry-yaki-ramen", name: "Dry Yaki Ramen", price: 38000 },
+    { id: "sambel-matah-karaage-ramen", name: "Sambel Matah Karaage Ramen", price: 35000, img: "sambel-matah-kaarage-ramen" },
+    { id: "spicy-chicken-ramen", name: "Spicy Chicken Ramen", price: 37000 },
+    { id: "katsu-curry-ramen", name: "Katsu Curry Ramen", price: 35000 },
+    { id: "miso-ramen-katsu-chicken", name: "Miso Ramen Katsu Chicken", price: 39000 },
+    { id: "tori-paitan-ramen", name: "Tori Paitan Ramen", price: 37000 },
+  ]},
+  { id: "bento", group: "food", name: "Bento", notes: FOOD_NOTES, items: [
+    { id: "butter-soya-soseji-bento", name: "Butter Soya Soseji Bento", price: 28000 },
+    { id: "spicy-soseji-bento", name: "Spicy Soseji Bento", price: 30000 },
+    { id: "chicken-karaage-sambal-matah", name: "Chicken Karaage Sambal Matah", price: 30000 },
+    { id: "chicken-karaage-mozzato", name: "Chicken Karaage Mozzato", price: 30000 },
+    { id: "chicken-karaage-spicy-cheese-bento", name: "Chicken Karaage Spicy Cheese Bento", price: 30000 },
+    { id: "chicken-karaage-butter-soya-bento", name: "Chicken Karaage Butter Soya Bento", price: 30000, img: "chicken-kaarage-butter-soya-bento" },
+    { id: "gochujang-fire-chicken", name: "Gochujang Fire Chicken", price: 32000, img: "gochunjang-fire-chicken" },
+  ]},
+  { id: "donburi", group: "food", name: "Rice Bowl", sub: "Donburi & curry", notes: FOOD_NOTES, items: [
+    { id: "gyu-don", name: "Gyu Don", price: 40000 },
+    { id: "gyu-tan-don", name: "Gyu Tan Don", price: 40000 },
+    { id: "chicken-katsudon", name: "Chicken Katsudon", price: 31000 },
+    { id: "karaage-egg-mayo-don", name: "Karaage Egg Mayo Don", price: 32000 },
+    { id: "chicken-katsu-curry", name: "Chicken Katsu Curry", price: 38000 },
+  ]},
+  { id: "breakfast", group: "food", name: "Breakfast & Sandwich", notes: FOOD_NOTES, items: [
+    { id: "sourdough-full-breakfast", name: "Sourdough Full Breakfast", price: 40000 },
+    { id: "french-full-breakfast", name: "French Full Breakfast", price: 42000 },
+    { id: "blt-sourdough-sandwich", name: "BLT Sourdough Sandwich", price: 39000 },
+    { id: "spicy-oriental-sourdough-sandwich", name: "Spicy Oriental Sourdough Sandwich", price: 39000 },
+  ]},
+  { id: "salad", group: "food", name: "Salad", notes: FOOD_NOTES, items: [
+    { id: "sesame-dressing-japanese-salad", name: "Sesame Dressing Japanese Salad", price: 37000 },
+    { id: "ham-and-cheese-italian-salad", name: "Ham and Cheese Italian Salad", price: 37000 },
+  ]},
+  { id: "pasta", group: "food", name: "Pasta", notes: FOOD_NOTES, items: [
+    { id: "pasta-aglio-olio", name: "Pasta Aglio Olio", price: 30000, img: "pasta-oglio-olio" },
+    { id: "cheesy-pasta", name: "Cheesy Pasta", price: 31000 },
+  ]},
+
+  /* ---- Pastry & Dessert ---- */
+  { id: "pastry", group: "pastry", name: "Pastry", sub: "Croissant & crookies", items: [
+    { id: "croissant-plain", name: "Croissant Plain", price: 15500 },
+    { id: "croissant-cheese", name: "Croissant Cheese", price: 24000 },
+    { id: "almond-croissant", name: "Almond Croissant", price: 32000 },
+    { id: "matcha-croissant", name: "Matcha Croissant", price: 27000 },
+    { id: "red-velvet-croissant", name: "Red Velvet Croissant", price: 27000 },
+    { id: "double-chocolate-croissant", name: "Double Chocolate Croissant", price: 27000 },
+    { id: "croissant-piscok", name: "Croissant Piscok", price: 30000 },
+    { id: "pain-au-chocolate", name: "Pain au Chocolate", price: 20000 },
+    { id: "crookies-chocolate", name: "Crookies Chocolate", price: 30000 },
+  ]},
+  { id: "dessert", group: "pastry", name: "Dessert", sub: "Misu, cheesecake & cookies", items: [
+    { id: "classic-tiramisu", name: "Classic Tiramisu", price: 42000 },
+    { id: "matcha-misu", name: "Matcha Misu", price: 42000 },
+    { id: "cookies-misu", name: "Cookies Misu", price: 30000 },
+    { id: "new-york-cheesecake", name: "New York Cheesecake", price: 31000 },
+    { id: "cheesecake-biscoff", name: "Cheesecake Biscoff", price: 32000 },
+    { id: "cookies-chocolate", name: "Cookies Chocolate", price: 20000 },
+    { id: "cookies-matcha", name: "Cookies Matcha", price: 20000 },
   ]},
 ];
 

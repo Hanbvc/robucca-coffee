@@ -85,7 +85,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex: none;
   height: 44px; padding: 0 18px; border-radius: 12px; background: var(--green); color: #fff;
-  font-weight: 600; font-size: 14px; white-space: nowrap; transition: transform .12s var(--ease), background .15s, opacity .15s, box-shadow .15s;
+  font-weight: 600; font-size: 14px; white-space: nowrap; text-decoration: none; transition: transform .12s var(--ease), background .15s, opacity .15s, box-shadow .15s;
 }
 .btn:hover { background: var(--green-2); }
 .btn:active { transform: scale(.97); }

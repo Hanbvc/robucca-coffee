@@ -4,12 +4,12 @@
    versi terbaru, lalu jatuh ke cache bila offline. API tidak pernah di-cache.
    Tambah berkas baru ke SHELL (tes tests/sw.test.js memeriksanya).
    ========================================================= */
-const VERSION = 'robucca-pos-v2';
+const VERSION = 'robucca-pos-v3';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/pos.css',
   'js/app.js', 'js/boot.js', 'js/ops.js', 'js/state.js',
   'js/components/approve.js', 'js/components/charts.js', 'js/components/numpad.js', 'js/components/orderDetail.js', 'js/components/receipt.js',
-  'js/core/calc.js', 'js/core/dates.js', 'js/core/ids.js', 'js/core/money.js', 'js/core/perms.js', 'js/core/pin.js', 'js/core/report.js', 'js/core/seed.js', 'js/core/validate.js',
+  'js/core/calc.js', 'js/core/dates.js', 'js/core/ids.js', 'js/core/menu.js', 'js/core/money.js', 'js/core/perms.js', 'js/core/pin.js', 'js/core/report.js', 'js/core/seed.js', 'js/core/validate.js',
   'js/data/backend.js', 'js/data/bus.js', 'js/data/demo.js', 'js/data/local.js', 'js/data/master.js', 'js/data/remote.js',
   'js/lib/idb.js', 'js/lib/ui.js',
   'js/views/bills.js', 'js/views/history.js', 'js/views/kds.js', 'js/views/login.js', 'js/views/queue.js', 'js/views/sell.js', 'js/views/setup.js', 'js/views/shift.js',

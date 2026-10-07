@@ -27,7 +27,7 @@ test('daftar SHELL service worker lengkap & semua berkasnya ada', () => {
 test('semua berkas aplikasi tidak tertahan .gitignore (ikut ter-deploy)', (t) => {
   let ignored;
   try {
-    ignored = execFileSync('git', ['status', '--ignored', '--porcelain', '--', 'pos', 'server', 'js', 'css', 'assets', 'tests', 'index.html', 'manifest.webmanifest', 'package.json'], { cwd: ROOT, encoding: 'utf8' });
+    ignored = execFileSync('git', ['status', '--ignored', '--porcelain', '--', 'pos', 'menu', 'server', 'js', 'css', 'assets', 'tests', 'index.html', 'manifest.webmanifest', 'package.json'], { cwd: ROOT, encoding: 'utf8' });
   } catch (e) { t.skip('bukan repositori git'); return; }
   const lines = ignored.split('\n').filter((l) => l.startsWith('!!'));
   assert.deepEqual(lines, [], `Berkas aplikasi diabaikan git (tidak akan ter-commit/ter-deploy):\n${lines.join('\n')}`);
