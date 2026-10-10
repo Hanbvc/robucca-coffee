@@ -46,11 +46,18 @@ const pct = (n: number): number => Math.round(n * 100); // persen → basis poin
 
 // --- Bawaan POS lama -------------------------------------------------------
 
+/** Daftar hak akses (Super Admin '*' = semua): order.sell, order.void.approve, order.refund.approve, discount.approve,
+    shift.open/close/manage, cash.manage, kds.view, menu.availability, menu.manage, price.manage, inventory.manage, stock.manage,
+    promo.manage, staff.manage, device.manage, branch.manage, settings.manage, report.view, audit.view, reservation.manage.
+    Seed memperbarui hak akses peran setiap dijalankan (idempoten). */
 const PERMISSIONS: Record<RoleCode, string[]> = {
   SUPER_ADMIN: ['*'],
   BRANCH_MANAGER: [
     'order.sell', 'order.void.approve', 'order.refund.approve', 'discount.approve',
     'shift.manage', 'cash.manage', 'stock.manage', 'menu.availability', 'report.view', 'reservation.manage',
+    // Kantor cabang (POS lama: manajer = laporan, stok, karyawan kasir/dapur, perangkat, log cabangnya).
+    // Promo khusus cabangnya sendiri. Harga, menu pusat, cabang, & pengaturan hanya pemilik.
+    'staff.manage', 'device.manage', 'audit.view', 'promo.manage',
   ],
   CASHIER: ['order.sell', 'shift.open', 'shift.close', 'cash.manage', 'menu.availability', 'reservation.manage'],
   KITCHEN: ['kds.view'],

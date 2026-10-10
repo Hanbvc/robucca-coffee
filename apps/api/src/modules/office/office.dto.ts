@@ -117,21 +117,6 @@ export class AuditQueryDto extends PageQueryDto {
   format?: 'json' | 'csv';
 }
 
-export class HistoryQueryDto {
-  @IsOptional()
-  @Matches(YMD)
-  date?: string;
-
-  @IsOptional()
-  @IsIn(['paid', 'open', 'void', 'refunded', 'refund'])
-  status?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(60)
-  q?: string;
-}
-
 // ============================================================== menu
 
 export class CategoryDto {

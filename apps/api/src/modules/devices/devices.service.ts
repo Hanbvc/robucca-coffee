@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { canBranch, type StaffCtx } from '../../common/auth';
 import { randDigits } from '@robucca/core';
 import { randomToken, sha256 } from '../../common/tokens';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -13,8 +14,24 @@ export class DevicesService {
     private readonly audit: AuditService,
   ) {}
 
-  list() {
+  /** Manajer hanya mengelola perangkat cabangnya; perangkat kantor pusat (tanpa cabang) khusus Super Admin. */
+  async assertAccess(staff: StaffCtx, target: { deviceId?: string; branchCode?: string | undefined }): Promise<void> {
+    let branchId: string | null = null;
+    if (target.deviceId) {
+      const d = await this.prisma.db.device.findUnique({ where: { id: target.deviceId }, select: { branchId: true } });
+      if (!d) throw new NotFoundException('Perangkat tidak ditemukan');
+      branchId = d.branchId;
+    } else if (target.branchCode) {
+      const b = await this.prisma.db.branch.findUnique({ where: { code: target.branchCode }, select: { id: true } });
+      if (!b) throw new NotFoundException(`Cabang ${target.branchCode} tidak ditemukan`);
+      branchId = b.id;
+    }
+    if (branchId ? !canBranch(staff, branchId) : staff.branchIds !== null) throw new ForbiddenException('Perangkat di luar akses Anda');
+  }
+
+  list(branchIds: string[] | null = null) {
     return this.prisma.db.device.findMany({
+      where: branchIds ? { branchId: { in: branchIds } } : {},
       orderBy: [{ branchId: 'asc' }, { terminalNo: 'asc' }],
       select: {
         id: true, name: true, terminalNo: true, lastSeenAt: true, revokedAt: true, createdAt: true, pairingExpiresAt: true,

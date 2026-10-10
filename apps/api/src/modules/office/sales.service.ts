@@ -242,44 +242,13 @@ export class SalesService {
   }
 
   /** Shift terbuka milik perangkat (dipulihkan POS setelah dipasang ulang / data lokal hilang). */
-  async openShiftForDevice(deviceId: string, branchId: string | null) {
+  async openShiftForDevice(deviceId: string, branchId: string | null, terminalNo: number) {
     if (!branchId) return null;
-    const s = await this.prisma.db.shift.findFirst({ where: { deviceId, branchId, status: 'OPEN' }, orderBy: { openedAt: 'desc' }, select: { id: true } });
-    return s ? this.shift(null, s.id, branchId) : null;
-  }
-
-  /** Riwayat transaksi cabang per hari bisnis untuk perangkat POS (POS lama: Riwayat → Hari ini / Kemarin). */
-  async history(branchId: string, date: string | undefined, status: string | undefined, q: string | undefined) {
-    const b = await this.prisma.db.branch.findUniqueOrThrow({ where: { id: branchId }, select: { timezone: true, dayStartMinute: true } });
-    const day = date ?? todayFor(b);
-    const search = q?.trim();
-    const where: Prisma.OrderWhereInput = {
-      branchId,
-      businessDate: dateCol(day),
-      ...(status ? STATUS[status] : {}),
-      ...(search
-        ? { OR: [{ number: { contains: search, mode: 'insensitive' } }, { queueNumber: { contains: search } }, { tableNumber: { contains: search, mode: 'insensitive' } }, { customerName: { contains: search, mode: 'insensitive' } }, { cashier: { name: { contains: search, mode: 'insensitive' } } }] }
-        : {}),
-    };
-    const rows = await this.prisma.db.order.findMany({
-      where,
-      orderBy: [{ createdAt: 'desc' }],
-      take: 1000,
-      select: { ...ORDER_FEED_SELECT, cashier: { select: { name: true } }, channel: { select: { code: true, name: true } }, device: { select: { terminalNo: true } } },
+    const s = await this.prisma.db.shift.findFirst({
+      where: { branchId, status: 'OPEN', OR: [{ deviceId }, { device: { terminalNo } }] },
+      orderBy: { openedAt: 'desc' },
+      select: { id: true },
     });
-    // Ringkasan dihitung dari semua transaksi hari itu (tanpa filter status/cari), sama dengan POS lama.
-    const all = await this.prisma.db.order.groupBy({ by: ['status'], where: { branchId, businessDate: dateCol(day) }, _sum: { total: true }, _count: true });
-    const paid = all.filter((x) => x.status === 'PAID' || x.status === 'REFUNDED');
-    return {
-      date: day,
-      yesterday: addDays(day, -1),
-      summary: {
-        transactions: paid.reduce((a, x) => a + x._count, 0),
-        sales: paid.reduce((a, x) => a + (x._sum.total ?? 0), 0),
-        voids: all.find((x) => x.status === 'VOIDED')?._count ?? 0,
-        open: all.find((x) => x.status === 'OPEN')?._count ?? 0,
-      },
-      rows: rows.map((o) => ({ ...o, businessDate: ymdOfCol(o.businessDate), cashierName: o.cashier?.name ?? null, channelName: o.channel?.name ?? null, terminalNo: o.device?.terminalNo ?? null, totals: orderTotals({ ...o, items: o.items.filter((i) => !i.voidedAt) }) })),
-    };
+    return s ? this.shift(null, s.id, branchId) : null;
   }
 }
