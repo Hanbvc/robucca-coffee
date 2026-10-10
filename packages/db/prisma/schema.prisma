@@ -65,10 +65,21 @@ enum InventoryUnit {
 }
 
 /// PRD 4.1: Dine-in (nomor meja) & Takeaway di kasir; 4.2: Click & Collect dari PWA.
+/// Di luar PRD (dipertahankan dari sistem lama): pesanan ojol GoFood/GrabFood/ShopeeFood
+/// yang diinput kasir (FOOD_PLATFORM) dan delivery kurir dari PWA (DELIVERY).
 enum OrderType {
   DINE_IN
   TAKEAWAY
   CLICK_COLLECT
+  FOOD_PLATFORM
+  DELIVERY
+}
+
+/// Jenis kanal penjualan (POS lama: Dine In, Take Away, GoFood, GrabFood, ShopeeFood).
+enum ChannelType {
+  DINE_IN
+  TAKEAWAY
+  FOOD_PLATFORM
 }
 
 enum OrderSource {
@@ -92,6 +103,8 @@ enum FulfillmentStatus {
   RECEIVED
   PREPARING
   READY
+  /// Khusus DELIVERY: sudah diambil driver.
+  OUT_FOR_DELIVERY
   COMPLETED
   CANCELLED
 }
@@ -141,6 +154,36 @@ enum StockMovementType {
   TRANSFER_OUT
 }
 
+enum DiscountType {
+  /// value dalam basis poin (1000 = 10%).
+  PERCENT
+  /// value dalam rupiah.
+  AMOUNT
+}
+
+enum RoundingMode {
+  DOWN
+  NEAREST
+  UP
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  SEATED
+  CANCELLED
+  NO_SHOW
+}
+
+enum DeliveryStatus {
+  /// Menunggu pesanan siap / mencari driver.
+  SEARCHING_DRIVER
+  DRIVER_ASSIGNED
+  PICKED_UP
+  DELIVERED
+  CANCELLED
+}
+
 enum PointTransactionType {
   EARN
   REDEEM
@@ -153,32 +196,44 @@ enum PointTransactionType {
 // =====================================================================
 
 model Branch {
-  id             String   @id @default(uuid(7)) @db.Uuid
+  id                   String   @id @default(uuid(7)) @db.Uuid
   /// 2–4 huruf, dipakai di nomor struk (IJN1-261006-0042). Tidak boleh diubah setelah ada transaksi.
-  code           String   @unique @db.VarChar(4)
-  name           String
-  address        String?
-  phone          String?
+  code                 String   @unique @db.VarChar(4)
+  name                 String
+  address              String?
+  phone                String?
   /// Zona waktu IANA: Asia/Jakarta (WIB), Asia/Makassar (WITA), Asia/Jayapura (WIT).
-  timezone       String   @default("Asia/Jakarta")
+  timezone             String   @default("Asia/Jakarta")
   /// Menit setelah 00:00 saat hari bisnis berganti (mis. 180 = 03:00 untuk cabang buka lewat tengah malam).
-  dayStartMinute Int      @default(0) @db.SmallInt
-  openTime       String?  @db.VarChar(5)
-  closeTime      String?  @db.VarChar(5)
-  taxLabel       String   @default("PB1")
+  dayStartMinute       Int      @default(0) @db.SmallInt
+  openTime             String?  @db.VarChar(5)
+  closeTime            String?  @db.VarChar(5)
+  taxLabel             String   @default("PB1")
   /// Basis poin: 1000 = 10%.
-  taxRateBp      Int      @default(1000)
+  taxRateBp            Int      @default(1000)
   /// true = harga menu sudah termasuk pajak.
-  taxInclusive   Boolean  @default(true)
-  serviceRateBp  Int      @default(0)
+  taxInclusive         Boolean  @default(true)
+  serviceRateBp        Int      @default(0)
   /// Pajak juga dikenakan atas biaya layanan.
-  taxOnService   Boolean  @default(true)
-  receiptPaperMm Int      @default(80) @db.SmallInt
+  taxOnService         Boolean  @default(true)
+  receiptPaperMm       Int      @default(80) @db.SmallInt
+  /// Kosong = pakai OrganizationSetting.receiptFooter.
+  receiptFooter        String?
   /// Cabang menerima pesanan Click & Collect dari PWA.
-  acceptsPwa     Boolean  @default(true)
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+  acceptsPwa           Boolean  @default(true)
+  // --- Di luar PRD (dari PWA lama): delivery kurir & reservasi meja
+  /// Titik toko untuk menghitung jarak delivery.
+  latitude             Decimal? @db.Decimal(9, 6)
+  longitude            Decimal? @db.Decimal(9, 6)
+  acceptsDelivery      Boolean  @default(false)
+  deliveryMaxKm        Decimal? @db.Decimal(5, 2)
+  acceptsReservations  Boolean  @default(false)
+  maxReservationGuests Int      @default(30) @db.SmallInt
+  /// Area duduk yang bisa dipilih saat reservasi, mis. ["Indoor", "Outdoor", "Smoking"].
+  reservationAreas     String[]
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime @updatedAt @db.Timestamptz(3)
 
   staff             UserBranch[]
   products          ProductBranch[]
@@ -192,6 +247,9 @@ model Branch {
   stockMovements    StockMovement[]
   pointTransactions PointTransaction[]
   auditLogs         AuditLog[]
+  promotions        PromotionBranch[]
+  reservations      Reservation[]
+  deliveries        Delivery[]
 }
 
 model Role {
@@ -289,6 +347,28 @@ model Customer {
 
   orders            Order[]
   pointTransactions PointTransaction[]
+  addresses         CustomerAddress[]
+  reservations      Reservation[]
+}
+
+/// Alamat delivery tersimpan (PWA lama menyimpannya di perangkat).
+model CustomerAddress {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  customerId     String   @db.Uuid
+  label          String?
+  addressText    String
+  addressNote    String?
+  latitude       Decimal  @db.Decimal(9, 6)
+  longitude      Decimal  @db.Decimal(9, 6)
+  recipientName  String
+  recipientPhone String   @db.VarChar(16)
+  isDefault      Boolean  @default(false)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
 }
 
 model PointTransaction {
@@ -331,6 +411,7 @@ model Category {
   updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
 
   products Product[]
+  banners  Banner[]
 
   @@index([group, sortOrder])
 }
@@ -531,22 +612,24 @@ model StockMovement {
 
 /// Shift kas per perangkat: buka dengan floating cash, tutup dengan hitung kas (end of shift report).
 model Shift {
-  id             String      @id @default(uuid(7)) @db.Uuid
-  branchId       String      @db.Uuid
-  deviceId       String?     @db.Uuid
-  status         ShiftStatus @default(OPEN)
-  openedById     String      @db.Uuid
-  openedAt       DateTime    @db.Timestamptz(3)
+  id                   String      @id @default(uuid(7)) @db.Uuid
+  branchId             String      @db.Uuid
+  deviceId             String?     @db.Uuid
+  status               ShiftStatus @default(OPEN)
+  openedById           String      @db.Uuid
+  openedAt             DateTime    @db.Timestamptz(3)
   /// Floating cash / modal awal laci.
-  openingCash    Int
-  closedById     String?     @db.Uuid
-  closedAt       DateTime?   @db.Timestamptz(3)
+  openingCash          Int
+  closedById           String?     @db.Uuid
+  closedAt             DateTime?   @db.Timestamptz(3)
   /// Kas seharusnya (dihitung server saat tutup).
-  expectedCash   Int?
-  countedCash    Int?
+  expectedCash         Int?
+  countedCash          Int?
+  /// Rincian hitung pecahan saat tutup shift, mis. {"100000": 3, "50000": 4}.
+  countedDenominations Json?
   /// Wajib diisi bila countedCash ≠ expectedCash.
-  differenceNote String?
-  updatedAt      DateTime    @updatedAt @db.Timestamptz(3)
+  differenceNote       String?
+  updatedAt            DateTime    @updatedAt @db.Timestamptz(3)
 
   branch        Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
   device        Device?        @relation(fields: [deviceId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
@@ -586,34 +669,48 @@ model CashMovement {
 // =====================================================================
 
 model Order {
-  id           String            @id @default(uuid(7)) @db.Uuid
-  branchId     String            @db.Uuid
+  id               String            @id @default(uuid(7)) @db.Uuid
+  branchId         String            @db.Uuid
   /// Nomor struk unik per cabang, dibuat di perangkat tanpa koordinasi: IJN1-261006-0042.
-  number       String            @db.VarChar(40)
+  number           String            @db.VarChar(40)
   /// Nomor antrean di layar pelanggan, mis. "007", "B007", "A012" (PWA).
-  queueNumber  String            @db.VarChar(8)
-  source       OrderSource
-  type         OrderType
-  status       OrderStatus
-  fulfillment  FulfillmentStatus @default(RECEIVED)
-  tableNumber  String?           @db.VarChar(10)
+  queueNumber      String            @db.VarChar(8)
+  source           OrderSource
+  type             OrderType
+  status           OrderStatus
+  fulfillment      FulfillmentStatus @default(RECEIVED)
+  tableNumber      String?           @db.VarChar(10)
   /// Nama yang dipanggil saat pesanan siap (pelanggan tanpa akun juga bisa).
-  customerName String?
-  customerId   String?           @db.Uuid
-  deviceId     String?           @db.Uuid
-  shiftId      String?           @db.Uuid
-  cashierId    String?           @db.Uuid
+  customerName     String?
+  customerId       String?           @db.Uuid
+  deviceId         String?           @db.Uuid
+  shiftId          String?           @db.Uuid
+  cashierId        String?           @db.Uuid
   /// Tanggal bisnis menurut zona waktu & jam pergantian hari cabang.
-  businessDate DateTime          @db.Date
+  businessDate     DateTime          @db.Date
   /// Click & Collect terjadwal; kosong = secepatnya.
-  pickupAt     DateTime?         @db.Timestamptz(3)
-  note         String?
+  pickupAt         DateTime?         @db.Timestamptz(3)
+  note             String?
+  /// Kanal (Dine In, Take Away, GoFood, …); menentukan markup harga ojol.
+  channelId        String?           @db.Uuid
+  /// Salinan markup kanal saat transaksi (basis poin).
+  channelMarkupBp  Int               @default(0)
+  /// No. pesanan di aplikasi ojol (mis. F-123456789), untuk pencocokan.
+  platformOrderRef String?           @db.VarChar(40)
+  /// Promo pusat yang dipakai untuk diskon pesanan.
+  promotionId      String?           @db.Uuid
+  /// Pre-order dari reservasi meja.
+  reservationId    String?           @db.Uuid
+  /// Nomor WhatsApp untuk kirim struk / konfirmasi bila pelanggan tanpa akun.
+  customerPhone    String?           @db.VarChar(16)
 
-  // --- Ringkasan nilai (rupiah). Identitas: total = subtotal − discountTotal (net) + serviceCharge + tax (bila belum termasuk) + rounding
+  // --- Ringkasan nilai (rupiah). Identitas: total = subtotal − discountTotal (net) + serviceCharge + tax (bila belum termasuk) + deliveryFee + rounding
   subtotal      Int
   discountTotal Int     @default(0)
   serviceCharge Int     @default(0)
   taxTotal      Int     @default(0)
+  /// Ongkir delivery (dibayar pelanggan, di luar dasar pajak).
+  deliveryFee   Int     @default(0)
   rounding      Int     @default(0)
   total         Int
   // --- Konfigurasi pajak saat transaksi (salinan dari Branch; tarif bisa berubah kemudian)
@@ -642,6 +739,10 @@ model Order {
   cashier            User?              @relation("OrderCashier", fields: [cashierId], references: [id], onDelete: Restrict)
   discountApprovedBy User?              @relation("OrderDiscountApprovedBy", fields: [discountApprovedById], references: [id], onDelete: Restrict)
   voidedBy           User?              @relation("OrderVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  channel            SalesChannel?      @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  promotion          Promotion?         @relation(fields: [promotionId], references: [id], onDelete: Restrict)
+  reservation        Reservation?       @relation(fields: [reservationId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+  delivery           Delivery?
   items              OrderItem[]
   payments           Payment[]
   refund             Refund?
@@ -656,6 +757,7 @@ model Order {
   @@index([branchId, fulfillment])
   @@index([customerId, createdAt])
   @@index([shiftId])
+  @@index([reservationId])
 }
 
 model OrderItem {
@@ -668,6 +770,8 @@ model OrderItem {
   /// Harga satuan termasuk tambahan modifier.
   unitPrice       Int
   discountAmount  Int           @default(0)
+  /// Promo yang dipakai untuk diskon item ini (kosong = diskon manual / tanpa diskon).
+  promotionId     String?       @db.Uuid
   lineTotal       Int
   note            String?
   station         Station
@@ -681,6 +785,7 @@ model OrderItem {
   order     Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product   Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
   voidedBy  User?               @relation("OrderItemVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  promotion Promotion?          @relation(fields: [promotionId], references: [id], onDelete: Restrict)
   modifiers OrderItemModifier[]
 
   @@index([orderId])
@@ -711,6 +816,8 @@ model Payment {
   method           PaymentMethod
   /// Penyedia/aplikasi, mis. "gopay", "ovo", "midtrans", "bca-edc".
   provider         String?
+  /// Pilihan metode yang dipilih kasir (daftar bisa diatur di kantor).
+  paymentOptionId  String?       @db.Uuid
   status           PaymentStatus
   amount           Int
   /// Tunai: uang diterima & kembalian.
@@ -724,10 +831,11 @@ model Payment {
   createdAt        DateTime      @db.Timestamptz(3)
   paidAt           DateTime?     @db.Timestamptz(3)
 
-  branch     Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  order      Order  @relation(fields: [orderId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
-  shift      Shift? @relation(fields: [shiftId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
-  receivedBy User?  @relation(fields: [receivedById], references: [id], onDelete: Restrict)
+  branch     Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  order      Order          @relation(fields: [orderId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+  shift      Shift?         @relation(fields: [shiftId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+  receivedBy User?          @relation(fields: [receivedById], references: [id], onDelete: Restrict)
+  option     PaymentOption? @relation(fields: [paymentOptionId], references: [id], onDelete: Restrict)
 
   @@index([orderId])
   @@index([branchId, createdAt])
@@ -780,4 +888,190 @@ model AuditLog {
 
   @@index([branchId, createdAt])
   @@index([entity, entityId])
+}
+
+// =====================================================================
+// I. FITUR DI LUAR PRD YANG DIPERTAHANKAN DARI SISTEM LAMA
+// =====================================================================
+
+/// Pengaturan pusat (satu baris). POS lama: Kantor › Pengaturan.
+model OrganizationSetting {
+  id                      Int          @id @default(1)
+  orgName                 String       @default("Robucca")
+  tagline                 String?
+  instagram               String?
+  /// Pembulatan total, mis. ke bawah ke Rp100.
+  roundingUnit            Int          @default(100)
+  roundingMode            RoundingMode @default(DOWN)
+  /// Diskon manual kasir di atas batas ini butuh PIN manajer (basis poin).
+  maxCashierDiscountBp    Int          @default(1000)
+  /// Kunci layar kasir otomatis setelah N menit tanpa aktivitas (0 = mati).
+  autoLockMinutes         Int          @default(0) @db.SmallInt
+  autoPrintReceipt        Boolean      @default(false)
+  /// Menu yang stok bahannya habis tidak bisa dijual.
+  blockSaleWhenOutOfStock Boolean      @default(true)
+  /// Tiket dapur berwarna kuning/merah setelah N menit.
+  kdsWarnMinutes          Int          @default(8) @db.SmallInt
+  kdsLateMinutes          Int          @default(15) @db.SmallInt
+  receiptFooter           String?
+  updatedAt               DateTime     @updatedAt @db.Timestamptz(3)
+}
+
+/// Kanal penjualan & markup harga per kanal (harga ojol bisa lebih tinggi dari harga toko).
+model SalesChannel {
+  id        String      @id @default(uuid(7)) @db.Uuid
+  /// mis. "dinein", "takeaway", "gofood", "grabfood", "shopeefood".
+  code      String      @unique @db.VarChar(20)
+  name      String
+  type      ChannelType
+  /// Basis poin; harga kanal dibulatkan ke atas ke Rp500.
+  markupBp  Int         @default(0)
+  sortOrder Int         @default(0)
+  isActive  Boolean     @default(true)
+
+  orders Order[]
+}
+
+/// Daftar metode bayar yang tampil di kasir (Tunai, QRIS, GoPay, Kartu Debit, …).
+model PaymentOption {
+  id                String        @id @default(uuid(7)) @db.Uuid
+  code              String        @unique @db.VarChar(20)
+  name              String
+  method            PaymentMethod
+  provider          String?
+  /// Kasir wajib mengisi no. referensi/approval (kartu, transfer).
+  requiresReference Boolean       @default(false)
+  sortOrder         Int           @default(0)
+  isActive          Boolean       @default(true)
+
+  payments Payment[]
+}
+
+/// Promo & diskon pusat yang bisa dipilih kasir (per cabang & periode).
+model Promotion {
+  id               String       @id @default(uuid(7)) @db.Uuid
+  name             String
+  type             DiscountType
+  /// PERCENT: basis poin; AMOUNT: rupiah.
+  value            Int
+  /// Butuh PIN manajer (mis. diskon karyawan).
+  requiresApproval Boolean      @default(false)
+  /// true = berlaku di semua cabang; false = hanya cabang di PromotionBranch.
+  allBranches      Boolean      @default(true)
+  validFrom        DateTime?    @db.Timestamptz(3)
+  validUntil       DateTime?    @db.Timestamptz(3)
+  isActive         Boolean      @default(true)
+  createdAt        DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime     @updatedAt @db.Timestamptz(3)
+
+  branches   PromotionBranch[]
+  orders     Order[]
+  orderItems OrderItem[]
+}
+
+model PromotionBranch {
+  promotionId String @db.Uuid
+  branchId    String @db.Uuid
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, branchId])
+  @@index([branchId])
+}
+
+/// Reservasi meja dari PWA. Pre-order makanan untuk reservasi = Order dengan reservationId.
+model Reservation {
+  id          String            @id @default(uuid(7)) @db.Uuid
+  branchId    String            @db.Uuid
+  /// Kode yang ditunjukkan pelanggan, mis. RSV-4821.
+  code        String            @db.VarChar(12)
+  customerId  String?           @db.Uuid
+  name        String
+  phone       String            @db.VarChar(16)
+  reservedFor DateTime          @db.Timestamptz(3)
+  guests      Int               @db.SmallInt
+  area        String?
+  /// Acara, mis. "Ulang tahun", "Meeting".
+  occasion    String?
+  note        String?
+  status      ReservationStatus @default(PENDING)
+  createdAt   DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime          @updatedAt @db.Timestamptz(3)
+
+  branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  preOrders Order[]
+
+  @@unique([branchId, code])
+  /// Target FK gabungan (reservationId, branchId) dari Order.
+  @@unique([id, branchId])
+  @@index([branchId, reservedFor])
+}
+
+/// Layanan kurir untuk delivery PWA & tarif perkiraan ongkir (sebelum API kurir tersambung).
+model CourierService {
+  id        String  @id @default(uuid(7)) @db.Uuid
+  /// mis. "gosend", "grabexpress".
+  code      String  @unique @db.VarChar(20)
+  name      String
+  provider  String
+  baseFee   Int
+  perKmFee  Int
+  minFee    Int
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  deliveries Delivery[]
+}
+
+/// Detail pengantaran untuk pesanan DELIVERY (satu per pesanan).
+model Delivery {
+  id               String         @id @default(uuid(7)) @db.Uuid
+  branchId         String         @db.Uuid
+  orderId          String         @unique @db.Uuid
+  courierServiceId String         @db.Uuid
+  recipientName    String
+  recipientPhone   String         @db.VarChar(16)
+  addressText      String
+  addressNote      String?
+  latitude         Decimal        @db.Decimal(9, 6)
+  longitude        Decimal        @db.Decimal(9, 6)
+  distanceKm       Decimal        @db.Decimal(6, 2)
+  /// Ongkir yang ditagihkan (sama dengan Order.deliveryFee).
+  fee              Int
+  status           DeliveryStatus @default(SEARCHING_DRIVER)
+  /// ID pengiriman di API GoSend/GrabExpress. Unik → webhook ulang tidak dobel.
+  externalId       String?        @unique
+  driverName       String?
+  driverPhone      String?        @db.VarChar(16)
+  vehiclePlate     String?        @db.VarChar(15)
+  trackingUrl      String?
+  estimatedAt      DateTime?      @db.Timestamptz(3)
+  pickedUpAt       DateTime?      @db.Timestamptz(3)
+  deliveredAt      DateTime?      @db.Timestamptz(3)
+  createdAt        DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime       @updatedAt @db.Timestamptz(3)
+
+  branch  Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  order   Order          @relation(fields: [orderId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+  courier CourierService @relation(fields: [courierServiceId], references: [id], onDelete: Restrict)
+
+  /// Syarat Prisma untuk relasi 1-1 lewat FK gabungan.
+  @@unique([orderId, branchId])
+  @@index([branchId, status])
+}
+
+/// Banner beranda PWA (MG_BANNERS lama); bisa membuka kategori.
+model Banner {
+  id             String  @id @default(uuid(7)) @db.Uuid
+  imageUrl       String
+  label          String
+  categoryId     String? @db.Uuid
+  /// Posisi fokus gambar (CSS object-position), mis. "center".
+  objectPosition String  @default("center")
+  sortOrder      Int     @default(0)
+  isActive       Boolean @default(true)
+
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 }
