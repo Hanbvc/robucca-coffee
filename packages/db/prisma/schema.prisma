@@ -354,6 +354,18 @@ model Customer {
   reservations      Reservation[]
 }
 
+/// Kode OTP masuk PWA (satu kode aktif per nomor). Kode tidak pernah disimpan sebagai teks:
+/// codeHash = HMAC-SHA256(AUTH_SECRET, nomor + kode). Disimpan di database agar berlaku di semua instance API.
+model CustomerOtp {
+  /// Nomor WhatsApp E.164 tanpa '+'.
+  phone     String   @id @db.VarChar(16)
+  codeHash  String   @db.VarChar(64)
+  expiresAt DateTime @db.Timestamptz(3)
+  /// Percobaan salah untuk kode ini; kode hangus setelah batas.
+  attempts  Int      @default(0) @db.SmallInt
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+}
+
 /// Alamat delivery tersimpan (PWA lama menyimpannya di perangkat).
 model CustomerAddress {
   id             String   @id @default(uuid(7)) @db.Uuid
