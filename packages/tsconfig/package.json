@@ -1,0 +1,7 @@
+{
+  "name": "@robucca/tsconfig",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Konfigurasi TypeScript strict bersama untuk semua app & paket.",
+  "files": ["*.json"]
+}

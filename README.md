@@ -6,6 +6,25 @@ Prototipe web app mobile untuk **Robucca Ijen Nirwana, Malang** (Rbc Group). Pel
 
 **Coba langsung (paling nyaman di ponsel):** https://hanbvc.github.io/robucca-coffee/
 
+## Struktur baru (Project Nectar, sesuai PRD)
+
+Repo ini sedang dipindah ke monorepo sesuai PRD *Robbucca Unified POS & PWA System*. Kode lama di root tetap jalan dan menjadi acuan untuk porting, dan GitHub Pages tetap menayangkan prototipe lama.
+
+| Folder | Isi | Status |
+| --- | --- | --- |
+| `apps/api` | Backend NestJS (TypeScript) | Kerangka + `GET /health` |
+| `apps/pos` | Kasir React + Vite + Tailwind, siap Electron, offline-first | Kerangka |
+| `apps/pwa` | Aplikasi pelanggan Next.js (Click & Collect) | Kerangka |
+| `packages/db` | Prisma + PostgreSQL, skema bersama | **Draft skema, menunggu review** ([docs/schema-review.md](docs/schema-review.md)) |
+| `pos/`, `server/`, `index.html`, `js/`, `menu/` | POS dan PWA lama | Acuan, tidak diubah |
+
+```bash
+corepack enable && pnpm install
+pnpm typecheck && pnpm build   # semua app
+pnpm db:validate               # cek skema Prisma
+npm test                       # tes POS lama
+```
+
 ## Sistem kasir (POS) multi-cabang
 
 Folder [`pos/`](pos/) berisi sistem kasir untuk semua cabang: kasir (tablet/PC), layar dapur/bar, layar antrean, dan kantor pusat (dasbor & laporan lintas cabang, menu & harga per cabang, stok, promo, karyawan, perangkat). Bisa dicoba tanpa server di `/pos/` (mode demo, data di browser), atau dijalankan dengan server pusat (`npm start`, Node.js 22.13+) agar semua cabang memakai satu database dan tetap bisa berjualan saat offline. Panduan lengkap: [pos/README.md](pos/README.md).

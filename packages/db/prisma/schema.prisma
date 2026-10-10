@@ -1,0 +1,783 @@
+// =====================================================================
+// Robbucca Unified POS & PWA System (Project Nectar) — skema database
+// DRAF FASE 1 untuk direview. Belum ada migrasi; jangan dijalankan ke
+// database produksi sebelum disetujui.
+//
+// Prinsip:
+// - Satu database PostgreSQL untuk 4 cabang (single source of truth).
+// - Semua tabel transaksi & inventaris punya branchId. Relasi antartabel
+//   transaksi memakai FOREIGN KEY GABUNGAN (id, branchId) sehingga database
+//   sendiri menolak, misalnya, pembayaran cabang A untuk pesanan cabang B.
+// - ID UUID dibuat di perangkat (POS offline-first menulis ke IndexedDB dulu,
+//   lalu sinkron). @default(uuid(7)) hanya dipakai bila klien tidak mengirim ID.
+// - Uang dalam rupiah bulat (Int). Persentase dalam basis poin (1000 = 10%).
+// - Jumlah bahan baku Decimal(14,3) dalam satuan dasar (gram, ml, pcs).
+// - Waktu selalu timestamptz; tanggal bisnis (businessDate) mengikuti zona
+//   waktu & jam pergantian hari cabang (WIB/WITA/WIT).
+// =====================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =====================================================================
+// A. ENUM
+// =====================================================================
+
+/// Peran RBAC. PRD: Super Admin, Manajer Cabang, Kasir. KITCHEN ditambahkan
+/// untuk staf dapur/bar yang hanya membuka layar dapur (KDS).
+enum RoleCode {
+  SUPER_ADMIN
+  BRANCH_MANAGER
+  CASHIER
+  KITCHEN
+}
+
+/// Kelompok menu; urutan tampil di semua aplikasi: Minuman → Snack → Makanan Berat → Pastry & Dessert.
+enum MenuGroup {
+  DRINKS
+  SNACK
+  FOOD
+  PASTRY
+}
+
+/// Stasiun yang menerima tiket di layar dapur.
+enum Station {
+  BAR
+  KITCHEN
+  NONE
+}
+
+enum ModifierSelection {
+  SINGLE
+  MULTIPLE
+}
+
+enum InventoryUnit {
+  GRAM
+  MILLILITER
+  PIECE
+}
+
+/// PRD 4.1: Dine-in (nomor meja) & Takeaway di kasir; 4.2: Click & Collect dari PWA.
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+  CLICK_COLLECT
+}
+
+enum OrderSource {
+  POS
+  PWA
+}
+
+/// Status pembayaran/siklus pesanan.
+enum OrderStatus {
+  /// Tagihan terbuka: sudah dikirim ke dapur, dibayar belakangan (kasir).
+  OPEN
+  /// Pesanan PWA menunggu konfirmasi payment gateway.
+  AWAITING_PAYMENT
+  PAID
+  VOIDED
+  REFUNDED
+}
+
+/// Status penyiapan yang dilihat pelanggan PWA secara real-time.
+enum FulfillmentStatus {
+  RECEIVED
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+enum KitchenStatus {
+  QUEUED
+  DONE
+}
+
+enum PaymentMethod {
+  CASH
+  QRIS
+  DEBIT_CARD
+  CREDIT_CARD
+  E_WALLET
+  VIRTUAL_ACCOUNT
+  BANK_TRANSFER
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  EXPIRED
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum CashMovementType {
+  CASH_IN
+  CASH_OUT
+}
+
+enum StockMovementType {
+  /// Pemotongan otomatis dari BoM saat pesanan dibayar.
+  SALE
+  /// Pengembalian stok saat pesanan dibatalkan/di-refund.
+  SALE_REVERSAL
+  PURCHASE
+  /// Hasil stock opname (selisih fisik vs sistem).
+  ADJUSTMENT
+  WASTE
+  TRANSFER_IN
+  TRANSFER_OUT
+}
+
+enum PointTransactionType {
+  EARN
+  REDEEM
+  REVERSAL
+  ADJUSTMENT
+}
+
+// =====================================================================
+// B. CABANG, PERAN, STAF (RBAC)
+// =====================================================================
+
+model Branch {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  /// 2–4 huruf, dipakai di nomor struk (IJN1-261006-0042). Tidak boleh diubah setelah ada transaksi.
+  code           String   @unique @db.VarChar(4)
+  name           String
+  address        String?
+  phone          String?
+  /// Zona waktu IANA: Asia/Jakarta (WIB), Asia/Makassar (WITA), Asia/Jayapura (WIT).
+  timezone       String   @default("Asia/Jakarta")
+  /// Menit setelah 00:00 saat hari bisnis berganti (mis. 180 = 03:00 untuk cabang buka lewat tengah malam).
+  dayStartMinute Int      @default(0) @db.SmallInt
+  openTime       String?  @db.VarChar(5)
+  closeTime      String?  @db.VarChar(5)
+  taxLabel       String   @default("PB1")
+  /// Basis poin: 1000 = 10%.
+  taxRateBp      Int      @default(1000)
+  /// true = harga menu sudah termasuk pajak.
+  taxInclusive   Boolean  @default(true)
+  serviceRateBp  Int      @default(0)
+  /// Pajak juga dikenakan atas biaya layanan.
+  taxOnService   Boolean  @default(true)
+  receiptPaperMm Int      @default(80) @db.SmallInt
+  /// Cabang menerima pesanan Click & Collect dari PWA.
+  acceptsPwa     Boolean  @default(true)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+
+  staff             UserBranch[]
+  products          ProductBranch[]
+  stocks            InventoryStock[]
+  devices           Device[]
+  shifts            Shift[]
+  cashMovements     CashMovement[]
+  orders            Order[]
+  payments          Payment[]
+  refunds           Refund[]
+  stockMovements    StockMovement[]
+  pointTransactions PointTransaction[]
+  auditLogs         AuditLog[]
+}
+
+model Role {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  code        RoleCode @unique
+  name        String
+  /// Hak akses, mis. ["order.sell", "order.void.approve", "report.view", "menu.edit"].
+  permissions String[]
+  users       User[]
+}
+
+/// Staf (pengguna POS & dasbor). Pelanggan PWA ada di Customer.
+model User {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  name         String
+  /// Login dasbor (Super Admin & Manajer). Kasir/dapur cukup PIN di perangkat yang sudah dipasangkan.
+  email        String?   @unique
+  /// bcrypt (PRD §5).
+  passwordHash String?
+  /// bcrypt dari PIN 4–6 digit: login kasir & otorisasi void/refund/diskon.
+  pinHash      String?
+  roleId       String    @db.Uuid
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime? @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
+
+  role     Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  /// Cabang yang boleh diakses. Super Admin tidak perlu baris (akses semua cabang).
+  branches UserBranch[]
+
+  shiftsOpened      Shift[]         @relation("ShiftOpenedBy")
+  shiftsClosed      Shift[]         @relation("ShiftClosedBy")
+  cashMovements     CashMovement[]
+  ordersTaken       Order[]         @relation("OrderCashier")
+  ordersVoided      Order[]         @relation("OrderVoidedBy")
+  discountsApproved Order[]         @relation("OrderDiscountApprovedBy")
+  itemsVoided       OrderItem[]     @relation("OrderItemVoidedBy")
+  paymentsReceived  Payment[]
+  refundsApproved   Refund[]        @relation("RefundApprovedBy")
+  refundsProcessed  Refund[]        @relation("RefundProcessedBy")
+  stockMovements    StockMovement[]
+  auditLogs         AuditLog[]
+}
+
+model UserBranch {
+  userId   String @db.Uuid
+  branchId String @db.Uuid
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([userId, branchId])
+  @@index([branchId])
+}
+
+/// Perangkat POS/KDS yang dipasangkan ke cabang (token disimpan sebagai hash).
+/// branchId kosong = komputer kantor pusat.
+model Device {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  branchId   String?   @db.Uuid
+  name       String
+  /// Nomor terminal di cabang, bagian dari nomor struk. 0 untuk kantor pusat.
+  terminalNo Int       @db.SmallInt
+  tokenHash  String?   @unique
+  lastSeenAt DateTime? @db.Timestamptz(3)
+  revokedAt  DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  shifts Shift[]
+  orders Order[]
+
+  @@unique([branchId, terminalNo])
+  /// Target FK gabungan (deviceId, branchId) dari Shift & Order.
+  @@unique([id, branchId])
+}
+
+// =====================================================================
+// C. PELANGGAN & LOYALTY
+// =====================================================================
+
+/// Pelanggan PWA. Kunci loyalty = nomor WhatsApp (PRD 4.2).
+model Customer {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  /// Format E.164 tanpa '+', mis. 6281234567890.
+  phone           String    @unique @db.VarChar(16)
+  name            String?
+  /// Diisi setelah OTP WhatsApp berhasil; poin baru bisa ditukar setelah terverifikasi.
+  phoneVerifiedAt DateTime? @db.Timestamptz(3)
+  /// Saldo poin (cache). Sumber kebenaran = jumlah PointTransaction.
+  pointsBalance   Int       @default(0)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(3)
+
+  orders            Order[]
+  pointTransactions PointTransaction[]
+}
+
+model PointTransaction {
+  id         String               @id @default(uuid(7)) @db.Uuid
+  customerId String               @db.Uuid
+  branchId   String               @db.Uuid
+  orderId    String?              @db.Uuid
+  type       PointTransactionType
+  /// Positif = bertambah, negatif = berkurang.
+  points     Int
+  note       String?
+  createdAt  DateTime             @default(now()) @db.Timestamptz(3)
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  branch   Branch   @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  order    Order?   @relation(fields: [orderId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+
+  /// Satu pesanan hanya sekali mendapat poin (dan sekali penukaran).
+  @@unique([orderId, type])
+  @@index([customerId, createdAt])
+  @@index([branchId, createdAt])
+}
+
+// =====================================================================
+// D. MENU: KATEGORI, PRODUK, MODIFIER, KETERSEDIAAN PER CABANG
+// =====================================================================
+
+model Category {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  name        String
+  group       MenuGroup
+  /// Stasiun bawaan produk di kategori ini (bisa ditimpa per produk).
+  station     Station   @default(BAR)
+  /// Catatan cepat di kasir & PWA, mis. ["Tidak pedas", "Saus dipisah"].
+  quickNotes  String[]
+  isSignature Boolean   @default(false)
+  sortOrder   Int       @default(0)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  products Product[]
+
+  @@index([group, sortOrder])
+}
+
+model Product {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  /// Kode stabil (mis. "caffe-latte"): dipakai untuk impor dari js/data.js & nama berkas foto.
+  slug        String   @unique
+  categoryId  String   @db.Uuid
+  name        String
+  description String?
+  imageUrl    String?
+  /// Harga pusat (rupiah). Harga cabang bisa ditimpa di ProductBranch.
+  basePrice   Int
+  /// Kosong = ikut stasiun kategori.
+  station     Station?
+  isSignature Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  category       Category               @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  branchSettings ProductBranch[]
+  modifierGroups ProductModifierGroup[]
+  recipe         Recipe?
+  orderItems     OrderItem[]
+
+  @@index([categoryId, sortOrder])
+}
+
+/// Harga & ketersediaan menu per cabang (PRD 4.3 "kontrol ketersediaan menu spesifik per cabang").
+/// Tidak ada baris = tersedia dengan harga pusat.
+model ProductBranch {
+  productId     String   @db.Uuid
+  branchId      String   @db.Uuid
+  /// Kosong = pakai Product.basePrice.
+  priceOverride Int?
+  /// false = tidak dijual di cabang ini / ditandai habis.
+  isAvailable   Boolean  @default(true)
+  updatedAt     DateTime @updatedAt @db.Timestamptz(3)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([productId, branchId])
+  @@index([branchId])
+}
+
+/// Grup pilihan yang bisa dipakai banyak produk, mis. "Level Gula", "Pilihan Susu", "Ukuran".
+model ModifierGroup {
+  id         String            @id @default(uuid(7)) @db.Uuid
+  name       String
+  selection  ModifierSelection @default(SINGLE)
+  isRequired Boolean           @default(false)
+  /// Batas pilihan untuk MULTIPLE (mis. maks. 2 topping). Kosong = tanpa batas.
+  maxSelect  Int?              @db.SmallInt
+  sortOrder  Int               @default(0)
+  isActive   Boolean           @default(true)
+  createdAt  DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime          @updatedAt @db.Timestamptz(3)
+
+  options  ModifierOption[]
+  products ProductModifierGroup[]
+}
+
+model ModifierOption {
+  id         String  @id @default(uuid(7)) @db.Uuid
+  groupId    String  @db.Uuid
+  /// mis. "Oat Milk", "Less Sugar", "Hot", "Extra Shot".
+  name       String
+  /// Tambahan harga (rupiah), mis. Large +4.000.
+  priceDelta Int     @default(0)
+  isDefault  Boolean @default(false)
+  /// Foto pengganti (mis. versi Hot).
+  imageUrl   String?
+  sortOrder  Int     @default(0)
+  isActive   Boolean @default(true)
+
+  group      ModifierGroup       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  /// Penyesuaian bahan baku saat opsi ini dipilih (mis. Extra Shot: +18 g biji kopi).
+  recipe     Recipe?
+  orderItems OrderItemModifier[]
+
+  @@unique([groupId, name])
+}
+
+model ProductModifierGroup {
+  productId         String   @db.Uuid
+  groupId           String   @db.Uuid
+  sortOrder         Int      @default(0)
+  /// Grup hanya tampil bila salah satu opsi ini dipilih (mis. "Level Es" hanya untuk versi Iced).
+  /// Kosong = selalu tampil.
+  showWhenOptionIds String[] @db.Uuid
+
+  product Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  group   ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+
+  @@id([productId, groupId])
+}
+
+// =====================================================================
+// E. INVENTARIS & RESEP (BILL OF MATERIALS)
+// =====================================================================
+
+/// Bahan baku pusat (biji kopi, susu, cup, croissant jadi, …).
+model InventoryItem {
+  id        String        @id @default(uuid(7)) @db.Uuid
+  sku       String        @unique
+  name      String
+  unit      InventoryUnit
+  isActive  Boolean       @default(true)
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime      @updatedAt @db.Timestamptz(3)
+
+  stocks      InventoryStock[]
+  recipeLines RecipeLine[]
+}
+
+/// Stok satu bahan di satu cabang. Saldo (cache) = jumlah StockMovement cabang itu.
+model InventoryStock {
+  branchId        String   @db.Uuid
+  inventoryItemId String   @db.Uuid
+  quantity        Decimal  @default(0) @db.Decimal(14, 3)
+  /// Batas peringatan stok menipis.
+  reorderLevel    Decimal? @db.Decimal(14, 3)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+
+  branch        Branch          @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  inventoryItem InventoryItem   @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  movements     StockMovement[]
+
+  @@id([branchId, inventoryItemId])
+  @@index([inventoryItemId])
+}
+
+/// Resep (BoM). Tepat satu dari productId / modifierOptionId terisi
+/// (CHECK constraint ditambahkan di migrasi pertama; Prisma belum bisa menuliskannya).
+/// - Resep produk: bahan untuk 1 porsi dalam penyajian bawaan.
+/// - Resep opsi: penyesuaian saat opsi dipilih; jumlah boleh negatif
+///   (mis. Oat Milk: −150 ml susu sapi, +150 ml oat milk).
+model Recipe {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  productId        String?  @unique @db.Uuid
+  modifierOptionId String?  @unique @db.Uuid
+  note             String?
+  updatedAt        DateTime @updatedAt @db.Timestamptz(3)
+
+  product        Product?        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  modifierOption ModifierOption? @relation(fields: [modifierOptionId], references: [id], onDelete: Cascade)
+  lines          RecipeLine[]
+}
+
+model RecipeLine {
+  recipeId        String  @db.Uuid
+  inventoryItemId String  @db.Uuid
+  /// Dalam satuan bahan (gram/ml/pcs). Boleh negatif hanya di resep opsi.
+  quantity        Decimal @db.Decimal(14, 3)
+
+  recipe        Recipe        @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@id([recipeId, inventoryItemId])
+  @@index([inventoryItemId])
+}
+
+/// Buku besar stok per cabang. Penjualan memotong bahan sesuai Recipe di cabang pesanan.
+model StockMovement {
+  id              String            @id @default(uuid(7)) @db.Uuid
+  branchId        String            @db.Uuid
+  inventoryItemId String            @db.Uuid
+  type            StockMovementType
+  /// Positif = masuk, negatif = keluar.
+  quantity        Decimal           @db.Decimal(14, 3)
+  /// Pesanan yang memicu pemotongan BoM.
+  orderId         String?           @db.Uuid
+  /// Pasangan TRANSFER_OUT (cabang asal) ↔ TRANSFER_IN (cabang tujuan) berbagi transferId.
+  transferId      String?           @db.Uuid
+  note            String?
+  createdById     String?           @db.Uuid
+  createdAt       DateTime          @default(now()) @db.Timestamptz(3)
+
+  branch    Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  /// FK gabungan: pergerakan selalu milik stok cabang yang sama.
+  stock     InventoryStock @relation(fields: [branchId, inventoryItemId], references: [branchId, inventoryItemId], onDelete: Restrict, onUpdate: Restrict)
+  order     Order?         @relation(fields: [orderId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+  createdBy User?          @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([branchId, inventoryItemId, createdAt])
+  @@index([branchId, createdAt])
+  @@index([orderId])
+  @@index([transferId])
+}
+
+// =====================================================================
+// F. SHIFT KASIR & KAS
+// =====================================================================
+
+/// Shift kas per perangkat: buka dengan floating cash, tutup dengan hitung kas (end of shift report).
+model Shift {
+  id             String      @id @default(uuid(7)) @db.Uuid
+  branchId       String      @db.Uuid
+  deviceId       String?     @db.Uuid
+  status         ShiftStatus @default(OPEN)
+  openedById     String      @db.Uuid
+  openedAt       DateTime    @db.Timestamptz(3)
+  /// Floating cash / modal awal laci.
+  openingCash    Int
+  closedById     String?     @db.Uuid
+  closedAt       DateTime?   @db.Timestamptz(3)
+  /// Kas seharusnya (dihitung server saat tutup).
+  expectedCash   Int?
+  countedCash    Int?
+  /// Wajib diisi bila countedCash ≠ expectedCash.
+  differenceNote String?
+  updatedAt      DateTime    @updatedAt @db.Timestamptz(3)
+
+  branch        Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  device        Device?        @relation(fields: [deviceId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+  openedBy      User           @relation("ShiftOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)
+  closedBy      User?          @relation("ShiftClosedBy", fields: [closedById], references: [id], onDelete: Restrict)
+  cashMovements CashMovement[]
+  orders        Order[]
+  payments      Payment[]
+  refunds       Refund[]
+
+  /// Target FK gabungan (shiftId, branchId).
+  @@unique([id, branchId])
+  @@index([branchId, openedAt])
+  @@index([branchId, status])
+}
+
+model CashMovement {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  branchId    String           @db.Uuid
+  shiftId     String           @db.Uuid
+  type        CashMovementType
+  amount      Int
+  reason      String
+  createdById String           @db.Uuid
+  createdAt   DateTime         @db.Timestamptz(3)
+
+  branch    Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  shift     Shift  @relation(fields: [shiftId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+  createdBy User   @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([shiftId])
+  @@index([branchId, createdAt])
+}
+
+// =====================================================================
+// G. PESANAN, ITEM, PEMBAYARAN, REFUND
+// =====================================================================
+
+model Order {
+  id           String            @id @default(uuid(7)) @db.Uuid
+  branchId     String            @db.Uuid
+  /// Nomor struk unik per cabang, dibuat di perangkat tanpa koordinasi: IJN1-261006-0042.
+  number       String            @db.VarChar(40)
+  /// Nomor antrean di layar pelanggan, mis. "007", "B007", "A012" (PWA).
+  queueNumber  String            @db.VarChar(8)
+  source       OrderSource
+  type         OrderType
+  status       OrderStatus
+  fulfillment  FulfillmentStatus @default(RECEIVED)
+  tableNumber  String?           @db.VarChar(10)
+  /// Nama yang dipanggil saat pesanan siap (pelanggan tanpa akun juga bisa).
+  customerName String?
+  customerId   String?           @db.Uuid
+  deviceId     String?           @db.Uuid
+  shiftId      String?           @db.Uuid
+  cashierId    String?           @db.Uuid
+  /// Tanggal bisnis menurut zona waktu & jam pergantian hari cabang.
+  businessDate DateTime          @db.Date
+  /// Click & Collect terjadwal; kosong = secepatnya.
+  pickupAt     DateTime?         @db.Timestamptz(3)
+  note         String?
+
+  // --- Ringkasan nilai (rupiah). Identitas: total = subtotal − discountTotal (net) + serviceCharge + tax (bila belum termasuk) + rounding
+  subtotal      Int
+  discountTotal Int     @default(0)
+  serviceCharge Int     @default(0)
+  taxTotal      Int     @default(0)
+  rounding      Int     @default(0)
+  total         Int
+  // --- Konfigurasi pajak saat transaksi (salinan dari Branch; tarif bisa berubah kemudian)
+  taxRateBp     Int
+  taxInclusive  Boolean
+  serviceRateBp Int     @default(0)
+
+  discountNote         String?
+  discountApprovedById String?   @db.Uuid
+  voidReason           String?
+  voidedById           String?   @db.Uuid
+  voidedAt             DateTime? @db.Timestamptz(3)
+
+  createdAt   DateTime  @db.Timestamptz(3)
+  paidAt      DateTime? @db.Timestamptz(3)
+  readyAt     DateTime? @db.Timestamptz(3)
+  completedAt DateTime? @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+  /// Naik setiap perubahan; sinkron offline ditolak bila versi perangkat tertinggal (bukan "jam terbaru menang").
+  version     Int       @default(1)
+
+  branch             Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer           Customer?          @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  device             Device?            @relation(fields: [deviceId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+  shift              Shift?             @relation(fields: [shiftId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+  cashier            User?              @relation("OrderCashier", fields: [cashierId], references: [id], onDelete: Restrict)
+  discountApprovedBy User?              @relation("OrderDiscountApprovedBy", fields: [discountApprovedById], references: [id], onDelete: Restrict)
+  voidedBy           User?              @relation("OrderVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  items              OrderItem[]
+  payments           Payment[]
+  refund             Refund?
+  stockMovements     StockMovement[]
+  pointTransactions  PointTransaction[]
+
+  @@unique([branchId, number])
+  /// Target FK gabungan (orderId, branchId).
+  @@unique([id, branchId])
+  @@index([branchId, businessDate])
+  @@index([branchId, status])
+  @@index([branchId, fulfillment])
+  @@index([customerId, createdAt])
+  @@index([shiftId])
+}
+
+model OrderItem {
+  id              String        @id @default(uuid(7)) @db.Uuid
+  orderId         String        @db.Uuid
+  productId       String        @db.Uuid
+  /// Salinan nama & harga saat transaksi (menu bisa berubah kemudian).
+  productName     String
+  quantity        Int
+  /// Harga satuan termasuk tambahan modifier.
+  unitPrice       Int
+  discountAmount  Int           @default(0)
+  lineTotal       Int
+  note            String?
+  station         Station
+  kitchenStatus   KitchenStatus @default(QUEUED)
+  sentToKitchenAt DateTime?     @db.Timestamptz(3)
+  kitchenDoneAt   DateTime?     @db.Timestamptz(3)
+  voidedAt        DateTime?     @db.Timestamptz(3)
+  voidReason      String?
+  voidedById      String?       @db.Uuid
+
+  order     Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  voidedBy  User?               @relation("OrderItemVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  modifiers OrderItemModifier[]
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+/// Opsi yang dipilih per item (salinan nama & harga), dipakai juga untuk pemotongan BoM opsi.
+model OrderItemModifier {
+  id               String @id @default(uuid(7)) @db.Uuid
+  orderItemId      String @db.Uuid
+  modifierOptionId String @db.Uuid
+  groupName        String
+  optionName       String
+  priceDelta       Int    @default(0)
+
+  orderItem      OrderItem      @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  modifierOption ModifierOption @relation(fields: [modifierOptionId], references: [id], onDelete: Restrict)
+
+  @@unique([orderItemId, modifierOptionId])
+}
+
+/// Satu pesanan bisa dibayar dengan beberapa pembayaran (split bill).
+model Payment {
+  id               String        @id @default(uuid(7)) @db.Uuid
+  branchId         String        @db.Uuid
+  orderId          String        @db.Uuid
+  shiftId          String?       @db.Uuid
+  method           PaymentMethod
+  /// Penyedia/aplikasi, mis. "gopay", "ovo", "midtrans", "bca-edc".
+  provider         String?
+  status           PaymentStatus
+  amount           Int
+  /// Tunai: uang diterima & kembalian.
+  tenderedAmount   Int?
+  changeAmount     Int?
+  /// ID transaksi payment gateway. Unik → webhook yang dikirim ulang tidak tercatat dua kali.
+  gatewayReference String?       @unique
+  /// No. approval EDC / referensi transfer.
+  reference        String?
+  receivedById     String?       @db.Uuid
+  createdAt        DateTime      @db.Timestamptz(3)
+  paidAt           DateTime?     @db.Timestamptz(3)
+
+  branch     Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  order      Order  @relation(fields: [orderId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+  shift      Shift? @relation(fields: [shiftId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+  receivedBy User?  @relation(fields: [receivedById], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([branchId, createdAt])
+  @@index([shiftId])
+}
+
+/// Refund penuh sebuah pesanan dengan otorisasi PIN manajer (PRD §5).
+/// orderId unik: satu pesanan tidak bisa di-refund dua kali.
+model Refund {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  branchId      String   @db.Uuid
+  orderId       String   @unique @db.Uuid
+  shiftId       String?  @db.Uuid
+  amount        Int
+  reason        String
+  approvedById  String   @db.Uuid
+  processedById String   @db.Uuid
+  createdAt     DateTime @db.Timestamptz(3)
+
+  branch      Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  order       Order  @relation(fields: [orderId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+  shift       Shift? @relation(fields: [shiftId, branchId], references: [id, branchId], onDelete: Restrict, onUpdate: Restrict)
+  approvedBy  User   @relation("RefundApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  processedBy User   @relation("RefundProcessedBy", fields: [processedById], references: [id], onDelete: Restrict)
+
+  /// Syarat Prisma untuk relasi 1-1 lewat FK gabungan.
+  @@unique([orderId, branchId])
+  @@index([branchId, createdAt])
+}
+
+// =====================================================================
+// H. LOG AKTIVITAS
+// =====================================================================
+
+/// Jejak void, refund, diskon yang disetujui, buka/tutup shift, perubahan menu & harga.
+model AuditLog {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  /// Kosong = tindakan tingkat pusat.
+  branchId  String?  @db.Uuid
+  actorId   String?  @db.Uuid
+  /// mis. "order.void", "order.refund", "discount.approve", "menu.price.update".
+  action    String
+  entity    String
+  entityId  String?
+  detail    Json?
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  actor  User?   @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([branchId, createdAt])
+  @@index([entity, entityId])
+}
