@@ -126,6 +126,8 @@ export class Backend {
     await this.loadMaster();
     this.syncErrors = [];
     await db.setMeta('syncErrors', []);
+    // Tarik feed sekali sebelum berjualan: nomor struk terminal yang dipasang ulang dilanjutkan, tidak dobel.
+    await this.pullFeed().catch((e: unknown) => console.warn('feed awal gagal', e));
   }
 
   /** Mode demo: snapshot master bawaan (tanpa server) + riwayat contoh. */

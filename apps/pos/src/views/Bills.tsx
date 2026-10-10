@@ -65,7 +65,7 @@ export function BillsView() {
                     {o.syncError && <span className="tag red">Ditolak server</span>}
                   </b>
                   <small>
-                    {o.channelName} · {o.totals.items} item · {o.number} · T{o.terminalNo ?? '-'} · {o.cashierName || (isAppOrder(o) ? 'aplikasi' : '')} · {clock(o.createdAt, b.timezone)} (
+                    {o.channelName} · {o.totals.items} item · {o.number}{o.terminalNo ? ` · T${o.terminalNo}` : ''} · {o.cashierName || (isAppOrder(o) ? 'aplikasi' : '')} · {clock(o.createdAt, b.timezone)} (
                     {ago(Date.now() - o.createdAt)})
                   </small>
                 </div>

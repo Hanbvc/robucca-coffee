@@ -15,7 +15,7 @@ const FULFILLMENTS = ['RECEIVED', 'PREPARING', 'READY', 'COMPLETED'];
 /* ---------- lokal → server ---------- */
 
 export function toServerOrder(o: Order): Record<string, unknown> {
-  const status = o.status === 'PAID' ? 'PAID' : o.status === 'VOIDED' ? 'VOIDED' : 'OPEN';
+  const status = o.status === 'PAID' || o.status === 'REFUNDED' ? 'PAID' : o.status === 'VOIDED' ? 'VOIDED' : 'OPEN';
   const doc: Record<string, unknown> = {
     id: o.id,
     number: o.number,
