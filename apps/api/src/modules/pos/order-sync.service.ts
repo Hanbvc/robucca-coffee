@@ -64,7 +64,10 @@ export class OrderSyncService {
   private async save(tx: Tx, doc: OrderDocDto, device: DeviceCtx, branchId: string): Promise<SyncResult> {
     const existing = await tx.order.findUnique({
       where: { id: doc.id },
-      select: { id: true, branchId: true, status: true, version: true, taxRateBp: true, taxInclusive: true, serviceRateBp: true, taxOnService: true, roundingUnit: true, roundingMode: true, channelMarkupBp: true, source: true },
+      select: {
+        id: true, branchId: true, status: true, version: true, taxRateBp: true, taxInclusive: true, serviceRateBp: true, taxOnService: true, roundingUnit: true, roundingMode: true, channelMarkupBp: true, source: true,
+        deliveryFee: true, number: true, queueNumber: true, type: true, customerName: true, customerPhone: true, note: true,
+      },
     });
     if (existing && existing.branchId !== branchId) throw new Reject(['Pesanan milik cabang lain']);
     if (existing) {
@@ -122,6 +125,8 @@ export class OrderSyncService {
       {
         lines: valid.map(({ it }) => ({ id: it.id, unitPrice: it.unitPrice, quantity: it.quantity, discount: it.discount ?? null, voided: !!it.voided })),
         discount: doc.discount ?? null,
+        // Ongkir pesanan delivery PWA tetap ikut total saat kasir menyelesaikan pesanan di POS.
+        deliveryFee: existing?.deliveryFee ?? 0,
       },
       cfg,
     );
@@ -187,16 +192,18 @@ export class OrderSyncService {
     // --- Simpan
     const createdAt = new Date(doc.createdAt);
     const now = new Date();
+    // Pesanan dari PWA: nomor, tipe, dan data pelanggan tetap milik pesanan aslinya (yang dilihat pelanggan).
+    const pwa = existing?.source === 'PWA' ? existing : null;
     const header = {
-      number: doc.number,
-      queueNumber: doc.queueNumber,
-      type: doc.type,
+      number: pwa ? pwa.number : doc.number,
+      queueNumber: pwa ? pwa.queueNumber : doc.queueNumber,
+      type: pwa ? pwa.type : doc.type,
       status: doc.status,
       ...(doc.fulfillment ? { fulfillment: doc.fulfillment } : {}),
       tableNumber: doc.tableNumber?.trim() || null,
-      customerName: doc.customerName?.trim() || null,
-      customerPhone: doc.customerPhone?.trim() || null,
-      note: doc.note?.trim() || null,
+      customerName: doc.customerName?.trim() || pwa?.customerName || null,
+      customerPhone: doc.customerPhone?.trim() || pwa?.customerPhone || null,
+      note: doc.note?.trim() || pwa?.note || null,
       platformOrderRef: doc.platformOrderRef?.trim() || null,
       channelId: channel?.id ?? null,
       channelMarkupBp: markupBp,

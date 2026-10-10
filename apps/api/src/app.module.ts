@@ -9,6 +9,7 @@ import { EventsModule } from './modules/events/events.module';
 import { MenuModule } from './modules/menu/menu.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PosModule } from './modules/pos/pos.module';
+import { PublicModule } from './modules/public/public.module';
 import { StockModule } from './modules/stock/stock.module';
 import { PrismaModule } from './prisma/prisma.module';
 
@@ -16,7 +17,7 @@ import { PrismaModule } from './prisma/prisma.module';
 @Module({
   imports: [
     PrismaModule, AuthModule, AuditModule, EventsModule, StockModule,
-    AuthHttpModule, DevicesModule, BranchesModule, MenuModule, PosModule, OrdersModule,
+    AuthHttpModule, DevicesModule, BranchesModule, MenuModule, PosModule, OrdersModule, PublicModule,
   ],
   controllers: [HealthController],
 })

@@ -26,7 +26,9 @@ export const ORDER_FEED_SELECT = {
       modifiers: { select: { modifierOptionId: true, groupName: true, optionName: true, priceDelta: true } },
     },
   },
-  payments: { select: { id: true, method: true, provider: true, amount: true, tenderedAmount: true, changeAmount: true, reference: true, paidAt: true, paymentOptionId: true } },
+  // Hanya pembayaran yang sudah diterima. Pembayaran online PWA yang belum dikonfirmasi kasir (PENDING) tidak dihitung lunas;
+  // metode pilihan pelanggan tertulis di catatan pesanan ("Bayar QRIS — menunggu konfirmasi kasir").
+  payments: { where: { status: 'SUCCEEDED' }, select: { id: true, method: true, provider: true, amount: true, tenderedAmount: true, changeAmount: true, reference: true, paidAt: true, paymentOptionId: true } },
   refund: { select: { amount: true, reason: true, createdAt: true } },
   delivery: { select: { status: true, recipientName: true, addressText: true, fee: true, driverName: true, vehiclePlate: true } },
 } satisfies Prisma.OrderSelect;

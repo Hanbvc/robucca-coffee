@@ -8,5 +8,6 @@ import { MenuService } from './menu.service';
   imports: [BranchesModule],
   controllers: [MenuController],
   providers: [MenuService, MenuRepository],
+  exports: [MenuService],
 })
 export class MenuModule {}
