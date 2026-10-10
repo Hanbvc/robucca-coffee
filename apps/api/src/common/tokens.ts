@@ -24,7 +24,8 @@ export function sign(payload: Record<string, unknown>, ttlSeconds: number): stri
   return `${body}.${sig}`;
 }
 
-export function verify<T extends Record<string, unknown>>(token: string): (T & { exp: number }) | null {
+/** graceSeconds: terima token yang sudah kedaluwarsa paling lama sekian detik (tanda tangan tetap wajib sah). */
+export function verify<T extends Record<string, unknown>>(token: string, graceSeconds = 0): (T & { exp: number }) | null {
   const [body, sig] = token.split('.');
   if (!body || !sig) return null;
   const expected = createHmac('sha256', key()).update(body).digest();
@@ -32,7 +33,7 @@ export function verify<T extends Record<string, unknown>>(token: string): (T & {
   if (got.length !== expected.length || !timingSafeEqual(got, expected)) return null;
   try {
     const p = JSON.parse(Buffer.from(body, 'base64url').toString()) as T & { exp: number };
-    return typeof p.exp === 'number' && p.exp * 1000 > Date.now() ? p : null;
+    return typeof p.exp === 'number' && (p.exp + graceSeconds) * 1000 > Date.now() ? p : null;
   } catch {
     return null;
   }

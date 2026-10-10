@@ -12,7 +12,7 @@ import {
 } from '@robucca/core';
 import type { Prisma } from '@robucca/db';
 import { can, canBranch, type DeviceCtx, type StaffCtx } from '../../common/auth';
-import { verify } from '../../common/tokens';
+import { sha256, verify } from '../../common/tokens';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { StockService, type SoldItem } from '../stock/stock.service';
@@ -35,6 +35,9 @@ const discountBp = (d: DiscountDto | undefined, base: number): number => {
 };
 
 type Tx = Prisma.TransactionClient;
+
+/** Token persetujuan berlaku 5 menit; boleh terkirim hingga 24 jam kemudian (perangkat sempat offline). */
+const APPROVAL_GRACE_S = 24 * 3600;
 
 @Injectable()
 export class OrderSyncService {
@@ -150,7 +153,7 @@ export class OrderSyncService {
       const manualLineBp = Math.max(0, ...valid.filter((l) => !l.it.promotionId).map((l) => discountBp(l.it.discount, l.it.unitPrice * l.it.quantity)));
       const needsApproval = manualOrderBp > maxBp || manualLineBp > maxBp || promos.some((p) => p.requiresApproval) || !can(cashier, 'order.sell');
       if (needsApproval) {
-        discountApprovedById = await this.approver(tx, branchId, device, 'discount.approve', doc.discountApproval, doc.discountApprovedById, doc.id, 'discount');
+        discountApprovedById = await this.approver(tx, branchId, device, 'discount.approve', doc.discountApproval, doc.discountApprovedById, cashier.id, doc.id, 'discount');
         if (!discountApprovedById && can(cashier, 'discount.approve')) discountApprovedById = cashier.id;
         if (!discountApprovedById) throw new Reject(['Diskon ini butuh persetujuan manajer (PIN)']);
       }
@@ -175,7 +178,7 @@ export class OrderSyncService {
     if (doc.status === 'VOIDED') {
       if (!doc.voidReason?.trim()) throw new Reject(['Alasan void wajib diisi']);
       if (wasPaid || doc.payments.length) {
-        voidedById = await this.approver(tx, branchId, device, 'order.void.approve', doc.voidApproval, doc.voidedById, doc.id, 'void');
+        voidedById = await this.approver(tx, branchId, device, 'order.void.approve', doc.voidApproval, doc.voidedById, cashier.id, doc.id, 'void');
         if (!voidedById && can(cashier, 'order.void.approve')) voidedById = cashier.id;
         if (!voidedById) throw new Reject(['Void pesanan lunas butuh persetujuan manajer (PIN)']);
       } else voidedById = doc.voidedById ?? cashier.id;
@@ -342,24 +345,34 @@ export class OrderSyncService {
   }
 
   /**
-   * Penyetuju untuk tindakan berisiko. Online: token dari /pos/approve (diverifikasi).
-   * Offline: perangkat sudah memeriksa PIN secara lokal; server hanya bisa memeriksa bahwa orangnya berhak,
-   * lalu mencatat log "approval.offline" agar bisa diaudit.
+   * Penyetuju untuk tindakan berisiko. Hanya token dari POST /pos/approve (PIN diperiksa server) yang diterima.
+   * Persetujuan offline (hanya ID penyetuju, PIN diperiksa di perangkat) DITOLAK: hash PIN penyetuju tidak lagi
+   * dikirim ke perangkat, sehingga kasir tidak bisa menebak PIN manajer secara offline lalu menyetujui sendiri.
+   * - Token boleh terkirim terlambat (perangkat sempat offline setelah persetujuan): tanda tangan wajib sah,
+   *   kedaluwarsa ditoleransi APPROVAL_GRACE_S, dan satu token hanya untuk satu pesanan.
+   * - Tanpa token: null (pemanggil lalu memeriksa apakah staf yang login sendiri berhak menyetujui).
    */
   private async approver(
     tx: Tx, branchId: string, device: DeviceCtx, perm: string,
-    token: string | undefined, offlineId: string | undefined, orderId: string, what: string,
+    token: string | undefined, approverId: string | undefined, cashierId: string, orderId: string, what: string,
   ): Promise<string | null> {
     if (token) {
-      const p = verify<{ sub: string; perm: string; dev: string }>(token);
+      const p = verify<{ sub: string; perm: string; dev: string }>(token, APPROVAL_GRACE_S);
       if (!p || p.perm !== perm || p.dev !== device.id) throw new Reject(['Persetujuan manajer tidak sah atau kedaluwarsa']);
+      const s = await this.staff(tx, p.sub);
+      if (!s || !can(s, perm) || !canBranch(s, branchId)) throw new Reject(['Penyetuju tidak berhak']);
+      // Satu token = satu pesanan (boleh dikirim ulang untuk versi berikut pesanan yang sama).
+      const key = sha256(token);
+      const used = await tx.auditLog.findFirst({ where: { entity: 'ApprovalToken', entityId: key }, select: { detail: true } });
+      const usedFor = (used?.detail as { orderId?: string } | null)?.orderId;
+      if (used && usedFor !== orderId) throw new Reject(['Persetujuan manajer ini sudah dipakai untuk transaksi lain']);
+      if (!used) {
+        await this.audit.log({ action: 'approval.token', entity: 'ApprovalToken', entityId: key, branchId, actorId: s.id, detail: { orderId, what, permission: perm, deviceId: device.id } }, tx);
+      }
       return p.sub;
     }
-    if (offlineId) {
-      const s = await this.staff(tx, offlineId);
-      if (!s || !can(s, perm) || !canBranch(s, branchId)) throw new Reject(['Penyetuju tidak berhak']);
-      await this.audit.log({ action: 'approval.offline', entity: 'Order', entityId: orderId, branchId, actorId: s.id, detail: { what, permission: perm, deviceId: device.id } }, tx);
-      return s.id;
+    if (approverId && approverId !== cashierId) {
+      throw new Reject(['Persetujuan manajer offline tidak diterima. Minta persetujuan PIN manajer saat perangkat online.']);
     }
     return null;
   }

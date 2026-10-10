@@ -8,6 +8,9 @@ import { EventsService } from '../events/events.service';
 import { OrderSyncService, type SyncResult } from './order-sync.service';
 import type { CashMovementDocDto, FulfillmentDocDto, KitchenDocDto, ShiftDocDto, SyncDto } from './sync.dto';
 
+/** Hak yang membuat staf menjadi penyetuju (hash PIN-nya tidak dikirim ke perangkat). */
+export const APPROVER_PERMS = ['*', 'order.void.approve', 'order.refund.approve', 'discount.approve'];
+
 type DocResult = { id: string; status: 'saved' | 'duplicate' | 'rejected'; errors?: string[] };
 
 /** Pesanan lengkap untuk feed perangkat (tagihan terbuka di terminal lain, layar dapur, antrean). */
@@ -234,7 +237,12 @@ export class PosService {
       paymentOptions,
       promotions,
       couriers,
-      staff: staff.map((s) => ({ id: s.id, name: s.name, pinHash: s.pinHash, role: s.role.code, permissions: s.role.permissions })),
+      // Hash PIN staf yang berhak menyetujui (void/refund/diskon) TIDAK dikirim: PIN 4–6 digit bisa ditebak offline
+      // dari hash. Staf ini hanya bisa login saat online (PIN diperiksa server lewat /pos/login & /pos/approve).
+      staff: staff.map((s) => {
+        const approver = APPROVER_PERMS.some((p) => s.role.permissions.includes(p));
+        return { id: s.id, name: s.name, pinHash: approver ? null : s.pinHash, onlineOnly: approver, role: s.role.code, permissions: s.role.permissions };
+      }),
     };
     const version = createHash('sha1').update(JSON.stringify(master)).digest('hex').slice(0, 16);
     return { version, master };
