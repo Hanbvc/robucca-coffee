@@ -18,7 +18,11 @@ export class MenuService {
       categories: categories
         .map((c) => ({
           id: c.id,
+          slug: c.slug,
           name: c.name,
+          description: c.description,
+          imageUrl: c.imageUrl,
+          isSignature: c.isSignature,
           group: c.group,
           quickNotes: c.quickNotes,
           products: c.products.map(({ branchSettings, modifierGroups, basePrice, ...p }) => {

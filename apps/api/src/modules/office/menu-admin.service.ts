@@ -53,9 +53,20 @@ export class MenuAdminService {
 
   // ------------------------------------------------------------ kategori
 
+  /** Kode kategori untuk tautan PWA (/menu#kode): dibuat sekali dari nama, tidak berubah saat nama diganti. */
+  private async uniqueCategorySlug(base: string): Promise<string> {
+    let slug = base || 'kategori';
+    for (let i = 2; await this.prisma.db.category.findUnique({ where: { slug }, select: { id: true } }); i++) slug = `${base}-${i}`;
+    return slug;
+  }
+
   async createCategory(staff: StaffCtx, b: CategoryDto) {
     const c = await this.prisma.db.category.create({
-      data: { name: b.name, group: b.group, station: b.station ?? (b.group === 'DRINKS' || b.group === 'PASTRY' ? 'BAR' : 'KITCHEN'), quickNotes: b.quickNotes ?? [], isSignature: b.isSignature ?? false, sortOrder: b.sortOrder ?? 0, isActive: b.isActive ?? true },
+      data: {
+        slug: await this.uniqueCategorySlug(slugify(b.name)), name: b.name, description: b.description || null, imageUrl: b.imageUrl || null, group: b.group,
+        station: b.station ?? (b.group === 'DRINKS' || b.group === 'PASTRY' ? 'BAR' : 'KITCHEN'), quickNotes: b.quickNotes ?? [], isSignature: b.isSignature ?? false,
+        sortOrder: b.sortOrder ?? 0, isActive: b.isActive ?? true,
+      },
     });
     await this.office.log(staff, 'menu.category.create', 'Category', c.id, null, { name: c.name });
     this.office.master(null, 'menu');
@@ -66,8 +77,9 @@ export class MenuAdminService {
     await this.prisma.db.category.findUniqueOrThrow({ where: { id } }).catch(() => {
       throw new NotFoundException('Kategori tidak ditemukan');
     });
-    const c = await this.prisma.db.category.update({ where: { id }, data: strip(b) });
-    await this.office.log(staff, 'menu.category.update', 'Category', id, null, { name: c.name, changes: strip(b) });
+    const data = strip({ ...b, description: b.description === '' ? null : b.description, imageUrl: b.imageUrl === '' ? null : b.imageUrl });
+    const c = await this.prisma.db.category.update({ where: { id }, data });
+    await this.office.log(staff, 'menu.category.update', 'Category', id, null, { name: c.name, changes: data });
     this.office.master(null, 'menu');
     return c;
   }

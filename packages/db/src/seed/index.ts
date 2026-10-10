@@ -44,6 +44,12 @@ const imageUrl = (img: string | null | undefined, fallback: string): string | nu
 
 const pct = (n: number): number => Math.round(n * 100); // persen → basis poin
 
+/** "https://www.tiktok.com/@robucca.id" atau "@robucca.id" → "@robucca.id"; kosong → null. */
+const tiktokHandle = (v: string | undefined): string | null => {
+  const m = v?.trim().match(/@[\w.]+/);
+  return m ? m[0] : null;
+};
+
 // --- Bawaan POS lama -------------------------------------------------------
 
 /** Daftar hak akses (Super Admin '*' = semua): order.sell, order.void.approve, order.refund.approve, discount.approve,
@@ -128,6 +134,7 @@ async function seed(db: PrismaClient): Promise<void> {
       orgName: CONFIG.storeName ?? 'Robucca',
       tagline: CONFIG.tagline ?? null,
       instagram: CONFIG.handle ?? null,
+      tiktok: tiktokHandle(CONFIG.tiktok),
       roundingUnit: 100,
       roundingMode: RoundingMode.DOWN,
       maxCashierDiscountBp: pct(10),
@@ -223,7 +230,20 @@ async function seed(db: PrismaClient): Promise<void> {
   for (const [ci, c] of MENU.entries()) {
     const group = groupOf(c);
     const categoryId = sid(`category:${c.id}`);
-    const cat = { name: c.name, group, station: stationOf(group), quickNotes: c.notes ?? [], sortOrder: ci + 1 };
+    const home = CONFIG.homeCats?.find(([id]) => id === c.id);
+    // Kode kategori dipakai tautan PWA; lewati bila sudah dipakai kategori lain (mis. dibuat dari Kantor).
+    const taken = await db.category.findUnique({ where: { slug: c.id }, select: { id: true } });
+    const cat = {
+      ...(taken && taken.id !== categoryId ? {} : { slug: c.id }),
+      name: c.name,
+      description: c.sub ?? null,
+      imageUrl: home ? imageUrl(home[2], home[2]) : null,
+      group,
+      station: stationOf(group),
+      quickNotes: c.notes ?? [],
+      isSignature: !!c.sig,
+      sortOrder: ci + 1,
+    };
     await db.category.upsert({ where: { id: categoryId }, update: cat, create: { id: categoryId, ...cat } });
 
     for (const [ii, it] of c.items.entries()) {

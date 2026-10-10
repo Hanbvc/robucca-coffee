@@ -9,6 +9,7 @@ import type { SseMessage } from '../events/events.service';
 import { CatalogService } from './catalog.service';
 import {
   clientIp, CurrentCustomer, CustomerAuthService, type CustomerCtx, CustomerGuard, type CustomerRequest, OptionalCustomerGuard, orderTokenValid,
+  reservationTokenValid,
 } from './customer-auth';
 import { CustomerService } from './customer.service';
 import { AddressDto, CreateOrderDto, LookupDto, OrderIdParams, OtpRequestDto, OtpVerifyDto, ProfileDto, ReservationDto } from './public.dto';
@@ -34,6 +35,28 @@ export class OrderAccessGuard implements CanActivate {
     if (customer && (await this.orders.ownedBy(id, customer.id))) return true;
     // Sama untuk "tidak ada" & "bukan milikmu": ID pesanan orang lain tidak bisa dipastikan ada.
     throw new NotFoundException('Pesanan tidak ditemukan');
+  }
+}
+
+/** Akses satu reservasi: token akses reservasi (?token= / X-Reservation-Token) atau pelanggan pemiliknya. */
+@Injectable()
+export class ReservationAccessGuard implements CanActivate {
+  constructor(
+    private readonly auth: CustomerAuthService,
+    private readonly customers: CustomerService,
+  ) {}
+
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
+    const req = ctx.switchToHttp().getRequest<CustomerRequest>();
+    const id = String(req.params.id ?? '');
+    const q = req.query.token;
+    const h = req.headers['x-reservation-token'];
+    const token = typeof h === 'string' && h ? h : typeof q === 'string' ? q : undefined;
+    if (reservationTokenValid(token, id)) return true;
+    const ct = req.headers['x-customer-token'];
+    const customer = typeof ct === 'string' ? await this.auth.fromToken(ct) : null;
+    if (customer && (await this.customers.ownsReservation(id, customer))) return true;
+    throw new NotFoundException('Reservasi tidak ditemukan');
   }
 }
 
@@ -173,30 +196,47 @@ export class PublicController {
     return this.orders.received(id);
   }
 
+  /** Batal bayar online, bayar di kasir saja (selama pembayaran online belum dikonfirmasi kasir; bukan delivery). */
+  @Post('orders/:id/pay-at-cashier')
+  @HttpCode(200)
+  @UseGuards(OrderAccessGuard)
+  payAtCashier(@Param() { id }: OrderIdParams) {
+    return this.orders.payAtCashier(id);
+  }
+
   // --- Reservasi ---------------------------------------------------------------------
 
+  /** Reservasi milik pelanggan yang masuk (termasuk yang dibuat sebagai tamu dengan nomor yang sama). */
   @Get('reservations')
   @UseGuards(CustomerGuard)
   reservations(@CurrentCustomer() c: CustomerCtx) {
     return this.customers.reservations(c);
   }
 
+  /** Reservasi baru. Tamu boleh; hasilnya membawa accessToken untuk melihat/membatalkan/pre-order. */
   @Post('reservations')
-  @UseGuards(CustomerGuard)
-  createReservation(@CurrentCustomer() c: CustomerCtx, @Body() body: ReservationDto) {
-    return this.customers.createReservation(c, body);
+  @UseGuards(OptionalCustomerGuard)
+  createReservation(@CurrentCustomer() c: CustomerCtx | null, @Body() body: ReservationDto, @Req() req: CustomerRequest) {
+    return this.customers.createReservation(c, body, clientIp(req));
+  }
+
+  /** Status beberapa reservasi sekaligus (riwayat di perangkat tamu). Ref dengan token tidak sah diabaikan. */
+  @Post('reservations/lookup')
+  @HttpCode(200)
+  lookupReservations(@Body() body: LookupDto) {
+    return this.customers.lookupReservations(body.refs.filter((r) => reservationTokenValid(r.token, r.id)).map((r) => r.id));
   }
 
   @Get('reservations/:id')
-  @UseGuards(CustomerGuard)
-  reservation(@CurrentCustomer() c: CustomerCtx, @Param() { id }: OrderIdParams) {
-    return this.customers.reservation(c, id);
+  @UseGuards(ReservationAccessGuard)
+  reservation(@Param() { id }: OrderIdParams) {
+    return this.customers.reservation(id);
   }
 
   @Post('reservations/:id/cancel')
   @HttpCode(200)
-  @UseGuards(CustomerGuard)
-  cancelReservation(@CurrentCustomer() c: CustomerCtx, @Param() { id }: OrderIdParams) {
-    return this.customers.cancelReservation(c, id);
+  @UseGuards(ReservationAccessGuard)
+  cancelReservation(@Param() { id }: OrderIdParams) {
+    return this.customers.cancelReservation(id);
   }
 }

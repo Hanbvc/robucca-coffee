@@ -34,6 +34,9 @@ export interface LegacyCategory {
   id: string;
   name: string;
   group?: string;
+  /** Keterangan di bawah judul kategori, mis. "Donburi & curry". */
+  sub?: string;
+  sig?: boolean;
   notes?: string[];
   items: LegacyItem[];
 }
@@ -51,6 +54,9 @@ export interface LegacyConfig {
   storeName?: string;
   branch?: string;
   tagline?: string;
+  tiktok?: string;
+  /** Kisi kategori beranda: [id kategori, label, foto]. */
+  homeCats?: [string, string, string][];
   address?: string;
   phoneDisplay?: string;
   handle?: string;

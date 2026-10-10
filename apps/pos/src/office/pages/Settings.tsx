@@ -10,7 +10,7 @@ import { errText, oc, oget } from '../lib';
 import { Body, PageHead, Switch, useLoad } from '../ui';
 
 interface Org {
-  orgName: string; tagline: string | null; instagram: string | null; roundingUnit: number; roundingMode: 'DOWN' | 'NEAREST' | 'UP'; maxCashierDiscountBp: number;
+  orgName: string; tagline: string | null; instagram: string | null; tiktok: string | null; roundingUnit: number; roundingMode: 'DOWN' | 'NEAREST' | 'UP'; maxCashierDiscountBp: number;
   autoLockMinutes: number; autoPrintReceipt: boolean; blockSaleWhenOutOfStock: boolean; kdsWarnMinutes: number; kdsLateMinutes: number; receiptFooter: string | null;
 }
 interface Channel { id: string; code: string; name: string; type: 'DINE_IN' | 'TAKEAWAY' | 'FOOD_PLATFORM'; markupBp: number; isActive: boolean }
@@ -115,6 +115,12 @@ function Form({ d, reload }: { d: Data; reload: () => void }) {
           <label className="field">
             <span>Tagline</span>
             <input className="input" value={s.tagline ?? ''} onChange={(e) => set('tagline', e.target.value || null)} />
+          </label>
+          <label className="field">
+            <span>
+              TikTok <em>(kosong = tidak tampil di aplikasi pelanggan)</em>
+            </span>
+            <input className="input" value={s.tiktok ?? ''} placeholder="@robucca.id" onChange={(e) => set('tiktok', e.target.value || null)} />
           </label>
           <label className="field full">
             <span>Catatan kaki struk</span>

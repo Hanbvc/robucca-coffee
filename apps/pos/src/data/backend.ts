@@ -643,7 +643,7 @@ export class Backend {
         if (r.status === 'saved' || r.status === 'duplicate') continue;
         const e = entries.find((x) => x.coll === coll && (x.id === r.id || (coll === 'kitchen' && (docs.get(x.k) as unknown as KitchenMark | undefined)?.orderId === r.id)));
         const d = e ? docs.get(e.k) : undefined;
-        const msgs = r.status === 'conflict' ? ['Diubah di terminal lain lebih dulu — memakai versi server'] : (r.errors ?? ['Ditolak server']);
+        const msgs = r.status === 'conflict' ? ['Sudah berubah di server lebih dulu (terminal lain, pelanggan, atau kantor) — memakai versi server'] : (r.errors ?? ['Ditolak server']);
         errors.push({ coll, id: r.id, label: label(coll, d), errors: msgs, at: Date.now() });
         if (coll === 'orders' && d) {
           if (r.status === 'conflict') await this.refetchOrder(r.id);

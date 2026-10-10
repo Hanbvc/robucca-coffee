@@ -413,7 +413,13 @@ model PointTransaction {
 
 model Category {
   id          String    @id @default(uuid(7)) @db.Uuid
+  /// Kode stabil (mis. "coffee"): tautan menu PWA (/menu#coffee) & impor dari js/data.js.
+  slug        String?   @unique @db.VarChar(60)
   name        String
+  /// Keterangan singkat di bawah judul kategori, mis. "Donburi & curry".
+  description String?
+  /// Foto kisi kategori di beranda PWA; kosong = kategori tidak tampil di kisi beranda.
+  imageUrl    String?
   group       MenuGroup
   /// Stasiun bawaan produk di kategori ini (bisa ditimpa per produk).
   station     Station   @default(BAR)
@@ -918,6 +924,8 @@ model OrganizationSetting {
   orgName                 String       @default("Robucca")
   tagline                 String?
   instagram               String?
+  /// Akun TikTok, mis. "@robucca.id" (kosong = tautan TikTok tidak tampil di PWA).
+  tiktok                  String?
   /// Pembulatan total, mis. ke bawah ke Rp100.
   roundingUnit            Int          @default(100)
   roundingMode            RoundingMode @default(DOWN)

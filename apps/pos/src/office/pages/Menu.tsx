@@ -12,7 +12,10 @@ import { Body, PageHead, Switch, useLoad } from '../ui';
 
 type Station = 'BAR' | 'KITCHEN' | 'NONE';
 type Group = 'DRINKS' | 'SNACK' | 'FOOD' | 'PASTRY';
-interface Cat { id: string; name: string; group: Group; station: Station; quickNotes: string[]; isSignature: boolean; sortOrder: number; isActive: boolean }
+interface Cat {
+  id: string; slug: string | null; name: string; description: string | null; imageUrl: string | null; group: Group; station: Station; quickNotes: string[]; isSignature: boolean;
+  sortOrder: number; isActive: boolean;
+}
 interface BranchSetting { branchId: string; priceOverride: number | null; isAvailable: boolean }
 interface Link { groupId: string; sortOrder: number; showWhenOptionIds: string[] }
 interface Prod {
@@ -255,11 +258,17 @@ function catDialog(c: Cat | null, count: number): Promise<boolean> {
   return openLayer<boolean>((close) => <CatBody c={c} count={count} close={close} />).then((v) => !!v);
 }
 function CatBody({ c, count, close }: { c: Cat | null; count: number; close: (v?: boolean) => void }) {
-  const [d, setD] = useState({ name: c?.name ?? '', group: c?.group ?? ('FOOD' as Group), station: c?.station ?? ('KITCHEN' as Station), notes: (c?.quickNotes ?? []).join(', '), sortOrder: c?.sortOrder ?? count + 1, isActive: c?.isActive ?? true });
+  const [d, setD] = useState({
+    name: c?.name ?? '', description: c?.description ?? '', imageUrl: c?.imageUrl ?? '', group: c?.group ?? ('FOOD' as Group), station: c?.station ?? ('KITCHEN' as Station),
+    notes: (c?.quickNotes ?? []).join(', '), isSignature: c?.isSignature ?? false, sortOrder: c?.sortOrder ?? count + 1, isActive: c?.isActive ?? true,
+  });
   const [err, setErr] = useState('');
   const save = async () => {
     if (!d.name.trim()) return setErr('Isi nama kategori.');
-    const body = { name: d.name.trim(), group: d.group, station: d.station, quickNotes: d.notes.split(',').map((x) => x.trim()).filter(Boolean), sortOrder: Number(d.sortOrder) || 0, isActive: d.isActive };
+    const body = {
+      name: d.name.trim(), description: d.description.trim() || null, imageUrl: d.imageUrl.trim() || null, group: d.group, station: d.station,
+      quickNotes: d.notes.split(',').map((x) => x.trim()).filter(Boolean), isSignature: d.isSignature, sortOrder: Number(d.sortOrder) || 0, isActive: d.isActive,
+    };
     try {
       await oc(c ? 'PATCH' : 'POST', c ? `/office/categories/${c.id}` : '/office/categories', body);
       toast('Kategori disimpan');
@@ -287,6 +296,19 @@ function CatBody({ c, count, close }: { c: Cat | null; count: number; close: (v?
         <label className="field">
           <span>Nama kategori</span>
           <input className="input" id="c-name" value={d.name} autoFocus onChange={(e) => setD({ ...d, name: e.target.value })} />
+        </label>
+        <label className="field">
+          <span>
+            Keterangan <em>(opsional, tampil di bawah judul kategori di aplikasi pelanggan)</em>
+          </span>
+          <input className="input" value={d.description} maxLength={120} placeholder="Donburi & curry" onChange={(e) => setD({ ...d, description: e.target.value })} />
+        </label>
+        <label className="field">
+          <span>
+            Foto beranda <em>(opsional)</em>
+          </span>
+          <input className="input" value={d.imageUrl} placeholder="assets/img/gyu-don.jpg" onChange={(e) => setD({ ...d, imageUrl: e.target.value })} />
+          <small>Kategori berfoto tampil di kisi kategori beranda aplikasi pelanggan.</small>
         </label>
         <label className="field">
           <span>Dikirim ke</span>
@@ -321,6 +343,13 @@ function CatBody({ c, count, close }: { c: Cat | null; count: number; close: (v?
           </span>
           <input className="input" type="number" min={0} value={d.sortOrder} onChange={(e) => setD({ ...d, sortOrder: Number(e.target.value) })} />
         </label>
+        <div className="switch-row">
+          <div className="grow">
+            <b>Signature</b>
+            <small>Ditandai ★ di daftar menu aplikasi pelanggan</small>
+          </div>
+          <Switch on={d.isSignature} label="Signature" onChange={(v) => setD({ ...d, isSignature: v })} />
+        </div>
         <div className="switch-row">
           <div className="grow">
             <b>Aktif</b>

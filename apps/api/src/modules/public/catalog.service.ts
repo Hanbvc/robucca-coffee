@@ -10,6 +10,11 @@ export const CASHIER = { code: 'cashier', name: 'Bayar di Kasir', method: null, 
 
 const num = (d: { toNumber(): number } | null): number | null => (d == null ? null : d.toNumber());
 
+/** Identitas brand untuk PWA (nama, tagline, akun Instagram & TikTok). */
+const orgOut = (s: { orgName: string; tagline: string | null; instagram: string | null; tiktok: string | null } | null) => ({
+  name: s?.orgName ?? 'Robucca', tagline: s?.tagline ?? null, instagram: s?.instagram ?? null, tiktok: s?.tiktok ?? null,
+});
+
 @Injectable()
 export class CatalogService {
   constructor(
@@ -51,12 +56,12 @@ export class CatalogService {
   async menuFor(code: string) {
     const b = await this.branchRow(code);
     const [menu, taxConfig, settings] = await Promise.all([this.menu.forBranch(code), this.taxConfig(b), this.prisma.db.organizationSetting.findUnique({ where: { id: 1 } })]);
-    return { branch: this.publicBranch(b), taxConfig, org: { name: settings?.orgName ?? 'Robucca', instagram: settings?.instagram ?? null }, categories: menu.categories };
+    return { branch: this.publicBranch(b), taxConfig, org: orgOut(settings), categories: menu.categories };
   }
 
   async appConfig(otpLogin: boolean) {
     const s = await this.prisma.db.organizationSetting.findUnique({ where: { id: 1 } });
-    return { org: { name: s?.orgName ?? 'Robucca', tagline: s?.tagline ?? null, instagram: s?.instagram ?? null }, otpLogin };
+    return { org: orgOut(s), otpLogin };
   }
 
   banners() {

@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuthService, can, canBranch, type DeviceCtx, type StaffCtx } from '../../common/auth';
 import { verify } from '../../common/tokens';
+import { SERVER_VERSION_STEP } from '../../common/versions';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EventsService } from '../events/events.service';
@@ -57,7 +58,7 @@ export class OrdersService {
       const refund = await tx.refund.create({
         data: { branchId: o.branchId, orderId: o.id, shiftId: shift?.id ?? null, amount: o.total, reason: reason.trim(), approvedById: approverId, processedById: staff.id, createdAt: new Date() },
       });
-      await tx.order.update({ where: { id: o.id }, data: { status: 'REFUNDED', version: { increment: 1 } } });
+      await tx.order.update({ where: { id: o.id }, data: { status: 'REFUNDED', version: { increment: SERVER_VERSION_STEP } } });
       await this.stock.applyOrder(tx, {
         branchId: o.branchId, orderId: o.id, sign: 1, actorId: staff.id, at: new Date(),
         items: o.items.map((i) => ({ productId: i.productId, quantity: i.quantity, optionIds: i.modifiers.map((m) => m.modifierOptionId) })),

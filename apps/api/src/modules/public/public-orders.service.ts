@@ -7,7 +7,7 @@
    - pembayaran online (QRIS/e-wallet) TIDAK bisa ditandai lunas oleh pelanggan: pesanan tetap OPEN
      dengan pembayaran PENDING sampai kasir mengonfirmasinya di POS (sinkron pesanan + pembayaran).
    Nomor struk memakai format POS (core.receiptNo) dengan terminal 0 = pesanan online, antrean "A001". */
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import {
   businessDate, calcOrder, chosenModifiers, deliveryEtaMinutes, deliveryFee, distanceKm, receiptNo, selectionErrors, unitPrice, uuidv7,
   type MenuProduct, type Selection,
@@ -15,11 +15,12 @@ import {
 import { Prisma } from '@robucca/db';
 import { concat, concatMap, defer, filter, from, map, type Observable, of, switchMap } from 'rxjs';
 import { RateLimiter } from '../../common/rate-limit';
+import { SERVER_VERSION_STEP } from '../../common/versions';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EventsService, type SseMessage } from '../events/events.service';
 import { CatalogService, ONLINE_METHODS } from './catalog.service';
-import { type CustomerCtx, hit, orderToken, phoneOrThrow } from './customer-auth';
+import { type CustomerCtx, hit, orderToken, phoneOrThrow, reservationTokenValid } from './customer-auth';
 import type { CreateOrderDto } from './public.dto';
 
 export const PWA_TERMINAL = 0;
@@ -48,10 +49,11 @@ export const PUBLIC_ORDER_SELECT = {
   items: {
     where: { voidedAt: null },
     select: {
-      id: true, productName: true, quantity: true, unitPrice: true, lineTotal: true, note: true,
+      id: true, productId: true, productName: true, quantity: true, unitPrice: true, lineTotal: true, note: true,
       product: { select: { imageUrl: true } },
       modifiers: {
         select: {
+          modifierOptionId: true,
           optionName: true,
           modifierOption: { select: { isDefault: true, imageUrl: true, group: { select: { isRequired: true, selection: true } } } },
         },
@@ -116,6 +118,9 @@ export function toPublic(o: OrderRow) {
     version: o.version,
     items: o.items.map((i) => ({
       id: i.id,
+      /** Untuk "Pesan lagi": menu & opsi yang sama dimasukkan lagi ke keranjang (harga mengikuti menu terbaru). */
+      productId: i.productId,
+      optionIds: i.modifiers.map((m) => m.modifierOptionId),
       name: i.productName,
       quantity: i.quantity,
       unitPrice: i.unitPrice,
@@ -201,6 +206,41 @@ export class PublicOrdersService {
     return this.get(id);
   }
 
+  /** Pelanggan batal bayar online lalu bayar di kasir (prototipe lama: "Bayar di kasir saja").
+      Hanya selama pembayaran online belum dikonfirmasi kasir; delivery tetap wajib bayar online.
+      Pesanan biasa langsung masuk dapur (sama seperti memilih bayar di kasir sejak awal); pre-order reservasi tetap
+      menunggu jam reservasi. Versi naik SERVER_VERSION_STEP → salinan lama di POS tidak bisa menimpa diam-diam. */
+  async payAtCashier(id: string): Promise<PublicOrder> {
+    const o = await this.prisma.db.order.findUnique({
+      where: { id },
+      select: { branchId: true, number: true, status: true, type: true, reservationId: true, payments: { select: { status: true } } },
+    });
+    if (!o) throw new NotFoundException('Pesanan tidak ditemukan');
+    const pending = o.payments.some((p) => p.status === 'PENDING');
+    if (o.status === 'OPEN' && !pending && !o.payments.some((p) => p.status === 'SUCCEEDED')) return this.get(id); // sudah bayar di kasir
+    if (o.type === 'DELIVERY') throw new ConflictException('Delivery dibayar online (QRIS / e-wallet)');
+    if (o.status !== 'OPEN' || !pending) throw new ConflictException('Pembayaran pesanan ini sudah diproses kasir');
+    const now = new Date();
+    await this.withRetry(async (tx) => {
+      // Bersyarat: kasir bisa mengonfirmasi pembayaran online pada saat yang sama.
+      const cur = await tx.order.findUnique({ where: { id }, select: { status: true, note: true } });
+      const failed = await tx.payment.updateMany({ where: { orderId: id, status: 'PENDING' }, data: { status: 'FAILED' } });
+      if (!cur || cur.status !== 'OPEN' || !failed.count) throw new ConflictException('Pembayaran pesanan ini sudah diproses kasir');
+      // Segmen pertama catatan selalu metode bayar (lihat createChecked); catatan pelanggan tetap utuh.
+      const rest = (cur.note ?? '').split(' · ').filter(Boolean);
+      if (rest[0]?.startsWith('Bayar ')) rest.shift();
+      await tx.order.update({
+        where: { id },
+        data: { note: ['Bayar di kasir (pelanggan batal bayar online)', ...rest].join(' · ').slice(0, 300), version: { increment: SERVER_VERSION_STEP } },
+      });
+      if (!o.reservationId) await tx.orderItem.updateMany({ where: { orderId: id, sentToKitchenAt: null, voidedAt: null }, data: { sentToKitchenAt: now } });
+      await this.audit.log({ action: 'pwa.order.pay_at_cashier', entity: 'Order', entityId: id, branchId: o.branchId, actorId: null, detail: { number: o.number } }, tx);
+    });
+    this.events.emit({ branchId: o.branchId, type: 'feed', data: { at: Date.now() } });
+    this.events.emit({ branchId: o.branchId, type: 'order', data: { id } });
+    return this.get(id);
+  }
+
   /** Status real-time satu pesanan (SSE): status awal, lalu setiap ada perubahan pesanan di cabangnya. */
   stream(id: string): Observable<SseMessage> {
     let last = '';
@@ -261,9 +301,10 @@ export class PublicOrdersService {
     // --- Pre-order reservasi
     let reservation: { id: string; reservedFor: Date; code: string } | null = null;
     if (dto.reservationId) {
-      if (!customer) throw new ForbiddenException('Masuk dulu untuk pre-order reservasi');
       const r = await this.prisma.db.reservation.findUnique({ where: { id: dto.reservationId } });
-      if (!r || r.customerId !== customer.id || r.branchId !== branch.id) throw new Reject(400, 'Reservasi tidak ditemukan');
+      // Milik pelanggan yang masuk (akun, atau dibuat sebagai tamu dengan nomornya), atau tamu dengan token reservasi.
+      const owner = !!r && !!customer && (r.customerId === customer.id || (r.customerId === null && r.phone === customer.phone));
+      if (!r || !(owner || reservationTokenValid(dto.reservationToken, r.id)) || r.branchId !== branch.id) throw new Reject(400, 'Reservasi tidak ditemukan');
       if (r.status !== 'PENDING' && r.status !== 'CONFIRMED') throw new Reject(409, 'Reservasi sudah dibatalkan atau selesai');
       const dup = await this.prisma.db.order.count({ where: { reservationId: r.id, status: { notIn: ['VOIDED', 'REFUNDED'] } } });
       if (dup) throw new Reject(409, 'Reservasi ini sudah punya pre-order');

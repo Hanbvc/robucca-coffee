@@ -17,7 +17,7 @@ const api = path.resolve(here, '..');
 const dbPkg = path.resolve(here, '../../../packages/db');
 const PORT = 3250 + Math.floor(Math.random() * 50);
 const base = `http://127.0.0.1:${PORT}`;
-const env = { ...process.env, NODE_ENV: 'test', DATABASE_URL: URL_, AUTH_SECRET: 'tes-rahasia-yang-panjangnya-lebih-dari-32-karakter', PORT: String(PORT), PUBLIC_ORDER_IP_LIMIT: '200', PUBLIC_OTP_IP_LIMIT: '200' };
+const env = { ...process.env, NODE_ENV: 'test', DATABASE_URL: URL_, AUTH_SECRET: 'tes-rahasia-yang-panjangnya-lebih-dari-32-karakter', PORT: String(PORT), PUBLIC_ORDER_IP_LIMIT: '200', PUBLIC_OTP_IP_LIMIT: '200', PUBLIC_RSV_IP_LIMIT: '200' };
 
 let server; let db; let device; let menu; let sari; let shift;
 const run = Math.floor(Math.random() * 9e6) + 1e6;
@@ -77,6 +77,14 @@ test('katalog publik: cabang, menu + pajak, banner, kurir, metode bayar', { skip
   assert.equal(menu.branch.code, 'IJN');
   assert.equal(menu.taxConfig.taxRateBp, 1000);
   assert.equal(menu.categories.reduce((a, c) => a + c.products.length, 0), 95);
+  // Kategori untuk beranda PWA: kode tautan, keterangan, foto kisi, tanda Signature
+  const cat = (slug) => menu.categories.find((c) => c.slug === slug);
+  assert.equal(cat('donburi').description, 'Donburi & curry');
+  assert.equal(cat('coffee').imageUrl, 'assets/img/ice-caffe-latte.jpg');
+  assert.equal(cat('tea').imageUrl, null, 'tidak di kisi beranda');
+  assert.equal(cat('signature').isSignature, true);
+  assert.equal(menu.categories.filter((c) => c.imageUrl).length, 8);
+  assert.ok('tiktok' in cfg.org && 'tagline' in menu.org);
   assert.equal((await call('GET', '/public/banners')).body.length, 5);
   assert.deepEqual((await call('GET', '/public/couriers')).body.map((c) => c.code), ['gosend', 'grab']);
   const pays = (await call('GET', '/public/payment-options')).body.map((p) => p.code);
@@ -150,6 +158,9 @@ test('pesanan Pick Up: total dihitung server (harga + opsi + pajak termasuk), st
   assert.match(o.number, /^IJN0-\d{6}-\d{4}$/);
   assert.match(o.queueNumber, /^A\d{3}$/);
   assert.equal(o.items[0].summary, 'Iced · Large · Less Sugar · Less Ice');
+  // "Pesan lagi": menu & opsi yang sama
+  assert.equal(o.items[0].productId, latte().id);
+  assert.deepEqual(new Set(o.items[0].optionIds), new Set(latteLarge().optionIds));
   assert.ok(r.body.accessToken);
   const saved = await db.order.findUnique({ where: { id: o.id }, include: { items: { include: { modifiers: true } }, payments: true } });
   assert.equal(saved.source, 'PWA');
@@ -386,11 +397,13 @@ test('alamat tersimpan: tambah, ubah default, hapus; milik pelanggan lain tidak 
   assert.equal((await call('GET', '/public/me/addresses', null, { 'x-customer-token': t })).body.length, 1);
 });
 
-test('reservasi: butuh login, dibuat dengan kode, pre-order, lalu dibatalkan (pre-order belum bayar ikut batal)', { skip }, async () => {
-  const body = { branchCode: 'IJN', date: '', time: '10:00', guests: 4, area: 'Indoor', occasion: 'Ulang Tahun', note: 'Dekat jendela', name: 'Dinda', phone: phone(10) };
-  const d = new Date(Date.now() + 2 * 24 * 3600e3);
-  body.date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
-  assert.equal((await call('POST', '/public/reservations', body)).status, 401);
+const rsvBody = (n) => ({
+  branchCode: 'IJN', date: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date(Date.now() + 2 * 24 * 3600e3)),
+  time: '10:00', guests: 4, area: 'Indoor', occasion: 'Ulang Tahun', note: 'Dekat jendela', name: 'Dinda', phone: phone(n),
+});
+
+test('reservasi akun: dibuat dengan kode, pre-order, lalu dibatalkan (pre-order belum bayar ikut batal, versi melompat)', { skip }, async () => {
+  const body = rsvBody(10);
   const t = await login(10);
   const bad = await call('POST', '/public/reservations', { ...body, time: '22:00' }, { 'x-customer-token': t });
   assert.equal(bad.status, 400);
@@ -417,7 +430,83 @@ test('reservasi: butuh login, dibuat dengan kode, pre-order, lalu dibatalkan (pr
   assert.equal(c.body.status, 'CANCELLED');
   const o = await db.order.findUnique({ where: { id: pre.body.order.id } });
   assert.equal(o.status, 'VOIDED');
-  assert.equal(o.version, 2);
+  assert.equal(o.version, 1 + 1000, 'perubahan dari server melompati versi perangkat');
+});
+
+test('reservasi tamu: token akses untuk lihat, lookup, pre-order, batal; nomor yang sama melihatnya setelah masuk', { skip }, async () => {
+  const g = await call('POST', '/public/reservations', rsvBody(13));
+  assert.equal(g.status, 201, JSON.stringify(g.body));
+  assert.match(g.body.code, /^RSV-/);
+  const tok = g.body.accessToken;
+  assert.ok(tok);
+  // Tanpa token, atau dengan token pesanan (jenis lain) → 404
+  assert.equal((await call('GET', `/public/reservations/${g.body.id}`)).status, 404);
+  assert.equal((await call('GET', `/public/reservations/${g.body.id}?token=${encodeURIComponent(pickup.accessToken)}`)).status, 404);
+  const got = await call('GET', `/public/reservations/${g.body.id}`, null, { 'x-reservation-token': tok });
+  assert.equal(got.status, 200);
+  assert.equal(got.body.code, g.body.code);
+  const lk = await call('POST', '/public/reservations/lookup', { refs: [{ id: g.body.id, token: tok }, { id: randomUUID(), token: tok }] });
+  assert.deepEqual(lk.body.map((r) => r.id), [g.body.id]);
+  // Pre-order tamu: wajib token reservasi
+  const order = { branchCode: 'IJN', type: 'CLICK_COLLECT', name: 'Dinda', phone: phone(13), payment: 'cashier', reservationId: g.body.id, items: [fries()] };
+  assert.equal((await call('POST', '/public/orders', order)).status, 400);
+  const pre = await call('POST', '/public/orders', { ...order, reservationToken: tok });
+  assert.equal(pre.status, 201, JSON.stringify(pre.body));
+  assert.equal(pre.body.order.reservation.code, g.body.code);
+  // Nomor yang sama masuk dengan WhatsApp → reservasi tamunya ikut tampil (dengan token)
+  const t = await login(13);
+  const mine = await call('GET', '/public/reservations', null, { 'x-customer-token': t });
+  const m = mine.body.find((r) => r.id === g.body.id);
+  assert.ok(m && m.accessToken && m.preOrders.length === 1);
+  assert.equal((await call('GET', `/public/reservations/${g.body.id}`, null, { 'x-customer-token': t })).status, 200);
+  const c = await call('POST', `/public/reservations/${g.body.id}/cancel?token=${encodeURIComponent(tok)}`);
+  assert.equal(c.status, 200);
+  assert.equal(c.body.status, 'CANCELLED');
+  assert.equal((await db.order.findUnique({ where: { id: pre.body.order.id } })).status, 'VOIDED');
+});
+
+test('ganti ke bayar di kasir: e-wallet belum dikonfirmasi → bayar di kasir, tiket ke dapur, versi melompat (salinan POS lama = konflik)', { skip }, async () => {
+  const p = latte();
+  const r = await call('POST', '/public/orders', {
+    branchCode: 'IJN', type: 'CLICK_COLLECT', name: 'Raka', phone: phone(14), payment: 'gopay', note: 'Bayar pakai uang pas',
+    items: [{ productId: p.id, optionIds: [opt(p, 'Hot'), opt(p, 'Normal')], quantity: 1 }],
+  });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  const { id } = r.body.order;
+  const tok = r.body.accessToken;
+  // POS sudah memuat versi 1 sebelum pelanggan mengganti
+  const f = (await call('GET', '/pos/feed', null, { 'x-device-token': device })).body.orders.find((x) => x.id === id);
+  assert.equal(f.version, 1);
+  assert.equal((await call('POST', `/public/orders/${id}/pay-at-cashier`)).status, 404, 'tanpa token');
+  const s = await call('POST', `/public/orders/${id}/pay-at-cashier`, null, { 'x-order-token': tok });
+  assert.equal(s.status, 200, JSON.stringify(s.body));
+  assert.equal(s.body.payment.state, 'cashier');
+  assert.equal(s.body.stage, 'received');
+  assert.equal(s.body.version, 1001);
+  const saved = await db.order.findUnique({ where: { id }, include: { items: true, payments: true } });
+  assert.ok(saved.items.every((i) => i.sentToKitchenAt), 'langsung ke dapur seperti bayar di kasir');
+  assert.deepEqual(saved.payments.map((x) => x.status), ['FAILED']);
+  assert.equal(saved.note, 'Bayar di kasir (pelanggan batal bayar online) · Bayar pakai uang pas', 'catatan pelanggan utuh');
+  assert.equal((await call('POST', `/public/orders/${id}/pay-at-cashier`, null, { 'x-order-token': tok })).status, 200, 'diulang aman');
+  // Salinan POS dari versi 1 (versi 2) tidak boleh dianggap duplikat lalu terbuang diam-diam
+  const now = new Date().toISOString();
+  const doc = {
+    id, number: f.number, queueNumber: f.queueNumber, type: f.type, status: 'PAID', createdAt: f.createdAt, paidAt: now, cashierId: sari.id, shiftId: shift, version: 2,
+    items: f.items.map((i) => ({ id: i.id, productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, optionIds: i.modifiers.map((x) => x.modifierOptionId) })),
+    payments: [{ id: randomUUID(), optionCode: 'gopay', amount: f.total, at: now }],
+  };
+  assert.equal((await call('POST', '/pos/sync', { orders: [doc] }, { 'x-device-token': device })).body.orders[0].status, 'conflict');
+  // Kasir memakai versi server lalu menerima tunai
+  const ok = await call('POST', '/pos/sync', { orders: [{ ...doc, version: 1002, payments: [{ id: randomUUID(), optionCode: 'cash', amount: f.total, tendered: f.total, at: now }] }] }, { 'x-device-token': device });
+  assert.equal(ok.body.orders[0].status, 'saved', JSON.stringify(ok.body));
+  // Setelah lunas tidak bisa diganti lagi; delivery tidak bisa bayar di kasir
+  assert.equal((await call('POST', `/public/orders/${id}/pay-at-cashier`, null, { 'x-order-token': tok })).status, 409);
+  const dl = await call('POST', '/public/orders', {
+    branchCode: 'IJN', type: 'DELIVERY', name: 'Raka', phone: phone(14), payment: 'qris', items: [fries()],
+    delivery: { courierCode: 'grab', addressText: 'Jl. Soekarno Hatta No. 27, Malang', lat: -7.9420837, lng: 112.6220393 },
+  });
+  assert.equal(dl.status, 201, JSON.stringify(dl.body));
+  assert.equal((await call('POST', `/public/orders/${dl.body.order.id}/pay-at-cashier`, null, { 'x-order-token': dl.body.accessToken })).status, 409);
 });
 
 test('rate limit pesanan: per nomor dibatasi (429)', { skip }, async () => {

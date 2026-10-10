@@ -198,3 +198,11 @@ export const orderTokenValid = (token: string | undefined, orderId: string): boo
   const p = verify<{ oid: string; typ: string }>(token);
   return !!p && p.typ === 'order' && p.oid === orderId;
 };
+
+/** Token akses satu reservasi (tamu tanpa akun): lihat, batalkan, dan pre-order untuk reservasi itu saja. */
+export const reservationToken = (id: string): string => sign({ rid: id, typ: 'rsv' }, ORDER_TOKEN_TTL);
+export const reservationTokenValid = (token: string | undefined, id: string): boolean => {
+  if (!token) return false;
+  const p = verify<{ rid: string; typ: string }>(token);
+  return !!p && p.typ === 'rsv' && p.rid === id;
+};

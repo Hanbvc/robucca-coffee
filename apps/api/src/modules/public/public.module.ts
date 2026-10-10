@@ -3,13 +3,13 @@ import { MenuModule } from '../menu/menu.module';
 import { CatalogService } from './catalog.service';
 import { CustomerAuthService, CustomerGuard, OptionalCustomerGuard } from './customer-auth';
 import { CustomerService } from './customer.service';
-import { OrderAccessGuard, PublicController } from './public.controller';
+import { OrderAccessGuard, PublicController, ReservationAccessGuard } from './public.controller';
 import { PublicOrdersService } from './public-orders.service';
 
 /** API publik untuk PWA pelanggan (/public/*): katalog, OTP WhatsApp, pesanan, status real-time, reservasi, alamat. */
 @Module({
   imports: [MenuModule],
   controllers: [PublicController],
-  providers: [CatalogService, CustomerAuthService, CustomerGuard, OptionalCustomerGuard, OrderAccessGuard, CustomerService, PublicOrdersService],
+  providers: [CatalogService, CustomerAuthService, CustomerGuard, OptionalCustomerGuard, OrderAccessGuard, ReservationAccessGuard, CustomerService, PublicOrdersService],
 })
 export class PublicModule {}

@@ -13,7 +13,11 @@ export class MenuRepository {
       orderBy: [{ group: 'asc' }, { sortOrder: 'asc' }],
       select: {
         id: true,
+        slug: true,
         name: true,
+        description: true,
+        imageUrl: true,
+        isSignature: true,
         group: true,
         quickNotes: true,
         products: {

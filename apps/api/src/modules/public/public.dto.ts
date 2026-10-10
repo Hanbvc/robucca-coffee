@@ -128,10 +128,15 @@ export class CreateOrderDto {
   @MaxLength(200)
   note?: string;
 
-  /** Pre-order untuk reservasi milik pelanggan (butuh login). */
+  /** Pre-order untuk reservasi: milik pelanggan yang masuk, atau dengan token akses reservasi (tamu). */
   @IsOptional()
   @IsUUID()
   reservationId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  reservationToken?: string;
 
   @IsArray()
   @ArrayMinSize(1)

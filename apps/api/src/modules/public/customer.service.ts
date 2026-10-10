@@ -3,11 +3,12 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { randCode, zonedEpoch } from '@robucca/core';
 import { Prisma } from '@robucca/db';
 import { RateLimiter } from '../../common/rate-limit';
+import { SERVER_VERSION_STEP } from '../../common/versions';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EventsService } from '../events/events.service';
 import { CatalogService } from './catalog.service';
-import { type CustomerCtx, hit, phoneOrThrow } from './customer-auth';
+import { type CustomerCtx, hit, phoneOrThrow, reservationToken } from './customer-auth';
 import type { AddressDto, ReservationDto } from './public.dto';
 
 /** Reservasi bisa dibuat mulai 60 menit dari sekarang, paling jauh 30 hari ke depan. */
@@ -38,8 +39,9 @@ const addressOut = (a: Prisma.CustomerAddressGetPayload<{ select: typeof ADDRESS
 export class CustomerService {
   /** Tulis data pelanggan: 30 per pelanggan per 10 menit. */
   private readonly writes = new RateLimiter(30, 10 * 60_000, 10 * 60_000);
-  /** Reservasi baru: 5 per pelanggan per jam. */
+  /** Reservasi baru: 5 per akun / nomor tamu per jam, dan per IP (tamu tanpa akun). */
   private readonly rsvLimit = new RateLimiter(5, 3600e3, 3600e3);
+  private readonly rsvIp = new RateLimiter(Number(process.env.PUBLIC_RSV_IP_LIMIT) || 10, 3600e3, 3600e3);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -59,20 +61,38 @@ export class CustomerService {
 
   // --- Reservasi ---------------------------------------------------------------
 
+  /** Milik pelanggan: dibuat dengan akunnya, atau sebagai tamu dengan nomor WhatsApp yang sama (nomor sudah terverifikasi OTP). */
+  private ownerWhere(c: CustomerCtx): Prisma.ReservationWhereInput {
+    return { OR: [{ customerId: c.id }, { customerId: null, phone: c.phone }] };
+  }
+
   async reservations(c: CustomerCtx) {
-    return this.prisma.db.reservation.findMany({ where: { customerId: c.id }, orderBy: { reservedFor: 'desc' }, take: 50, select: RSV_SELECT });
+    const rows = await this.prisma.db.reservation.findMany({ where: this.ownerWhere(c), orderBy: { reservedFor: 'desc' }, take: 50, select: RSV_SELECT });
+    return rows.map((r) => ({ ...r, accessToken: reservationToken(r.id) }));
   }
 
-  async reservation(c: CustomerCtx, id: string) {
-    const r = await this.prisma.db.reservation.findUnique({ where: { id }, select: { ...RSV_SELECT, customerId: true } });
-    if (!r || r.customerId !== c.id) throw new NotFoundException('Reservasi tidak ditemukan');
-    const { customerId: _c, ...rest } = r;
-    return rest;
+  async ownsReservation(id: string, c: CustomerCtx): Promise<boolean> {
+    return (await this.prisma.db.reservation.count({ where: { id, ...this.ownerWhere(c) } })) > 0;
   }
 
-  async createReservation(c: CustomerCtx, dto: ReservationDto) {
-    hit(this.rsvLimit, c.id);
+  /** Satu reservasi (hak akses sudah diperiksa guard: token reservasi atau pemiliknya). */
+  async reservation(id: string) {
+    const r = await this.prisma.db.reservation.findUnique({ where: { id }, select: RSV_SELECT });
+    if (!r) throw new NotFoundException('Reservasi tidak ditemukan');
+    return r;
+  }
+
+  /** Beberapa reservasi sekaligus (riwayat di perangkat tamu); token sudah diperiksa pemanggil. */
+  async lookupReservations(ids: string[]) {
+    if (!ids.length) return [];
+    return this.prisma.db.reservation.findMany({ where: { id: { in: ids } }, orderBy: { reservedFor: 'desc' }, select: RSV_SELECT });
+  }
+
+  /** Reservasi baru. Tamu boleh (masuk dengan WhatsApp bisa tidak tersedia); hasilnya membawa token akses reservasi. */
+  async createReservation(c: CustomerCtx | null, dto: ReservationDto, ip: string) {
     const phone = phoneOrThrow(dto.phone);
+    hit(this.rsvIp, ip);
+    hit(this.rsvLimit, c?.id ?? phone);
     const b = await this.catalog.branchRow(dto.branchCode);
     if (!b.acceptsReservations) throw new BadRequestException(`${b.name} belum menerima reservasi online`);
     if (dto.guests > b.maxReservationGuests) throw new BadRequestException(`Maksimal ${b.maxReservationGuests} orang per reservasi`);
@@ -90,15 +110,18 @@ export class CustomerService {
       try {
         const r = await this.prisma.db.reservation.create({
           data: {
-            branchId: b.id, code: `RSV-${randCode(4)}`, customerId: c.id, name: dto.name, phone, reservedFor: new Date(at), guests: dto.guests,
+            branchId: b.id, code: `RSV-${randCode(4)}`, customerId: c?.id ?? null, name: dto.name, phone, reservedFor: new Date(at), guests: dto.guests,
             area, occasion: dto.occasion || null, note: dto.note || null,
           },
           select: RSV_SELECT,
         });
-        if (!c.name) await this.prisma.db.customer.update({ where: { id: c.id }, data: { name: dto.name } });
-        await this.audit.log({ action: 'pwa.reservation.create', entity: 'Reservation', entityId: r.id, branchId: b.id, detail: { code: r.code, guests: r.guests, at: r.reservedFor.toISOString() } });
+        if (c && !c.name) await this.prisma.db.customer.update({ where: { id: c.id }, data: { name: dto.name } });
+        await this.audit.log({
+          action: 'pwa.reservation.create', entity: 'Reservation', entityId: r.id, branchId: b.id,
+          detail: { code: r.code, guests: r.guests, at: r.reservedFor.toISOString(), guest: !c },
+        });
         this.events.emit({ branchId: b.id, type: 'feed', data: { at: Date.now(), reservation: r.id } });
-        return r;
+        return { ...r, accessToken: reservationToken(r.id) };
       } catch (e) {
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') continue; // kode kembar
         throw e;
@@ -107,27 +130,31 @@ export class CustomerService {
     throw new ConflictException('Gagal membuat kode reservasi, coba lagi');
   }
 
-  /** Batal oleh pelanggan. Pre-order yang belum dibayar ikut dibatalkan (versi naik → POS melihat perubahan). */
-  async cancelReservation(c: CustomerCtx, id: string) {
-    hit(this.writes, c.id);
+  /** Batal oleh pelanggan (hak akses diperiksa guard). Pre-order yang belum dibayar ikut dibatalkan (versi naik → POS melihat perubahan). */
+  async cancelReservation(id: string) {
+    hit(this.writes, `rsv:${id}`);
     const r = await this.prisma.db.reservation.findUnique({ where: { id } });
-    if (!r || r.customerId !== c.id) throw new NotFoundException('Reservasi tidak ditemukan');
-    if (r.status === 'CANCELLED') return this.reservation(c, id);
+    if (!r) throw new NotFoundException('Reservasi tidak ditemukan');
+    if (r.status === 'CANCELLED') return this.reservation(id);
     if (r.status !== 'PENDING' && r.status !== 'CONFIRMED') throw new ConflictException('Reservasi ini tidak bisa dibatalkan');
     await this.prisma.db.$transaction(async (tx) => {
       await tx.reservation.update({ where: { id }, data: { status: 'CANCELLED' } });
       const pre = await tx.order.findMany({ where: { reservationId: id, status: 'OPEN', payments: { none: { status: 'SUCCEEDED' } } }, select: { id: true } });
+      let voided = 0;
       for (const o of pre) {
-        await tx.order.update({
-          where: { id: o.id },
-          data: { status: 'VOIDED', fulfillment: 'CANCELLED', voidReason: 'Reservasi dibatalkan pelanggan', voidedAt: new Date(), version: { increment: 1 } },
+        // Bersyarat status OPEN: bila kasir melunasinya bersamaan, pre-order itu tidak ikut dibatalkan.
+        const n = await tx.order.updateMany({
+          where: { id: o.id, status: 'OPEN' },
+          data: { status: 'VOIDED', fulfillment: 'CANCELLED', voidReason: 'Reservasi dibatalkan pelanggan', voidedAt: new Date(), version: { increment: SERVER_VERSION_STEP } },
         });
+        if (!n.count) continue;
+        voided++;
         await tx.payment.updateMany({ where: { orderId: o.id, status: 'PENDING' }, data: { status: 'FAILED' } });
       }
-      await this.audit.log({ action: 'pwa.reservation.cancel', entity: 'Reservation', entityId: id, branchId: r.branchId, detail: { code: r.code, preOrdersVoided: pre.length } }, tx);
+      await this.audit.log({ action: 'pwa.reservation.cancel', entity: 'Reservation', entityId: id, branchId: r.branchId, detail: { code: r.code, preOrdersVoided: voided } }, tx);
     });
     this.events.emit({ branchId: r.branchId, type: 'feed', data: { at: Date.now(), reservation: id } });
-    return this.reservation(c, id);
+    return this.reservation(id);
   }
 
   // --- Alamat tersimpan -----------------------------------------------------------

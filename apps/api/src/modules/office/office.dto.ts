@@ -143,6 +143,21 @@ export class CategoryDto {
   @IsBoolean()
   isSignature?: boolean;
 
+  /** Keterangan di bawah judul kategori (PWA), mis. "Donburi & curry". */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @Transform(trim)
+  @IsString()
+  @MaxLength(120)
+  description?: string | null;
+
+  /** Foto kisi kategori di beranda PWA; kosong = tidak tampil di kisi beranda. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @Matches(IMAGE_URL, { message: 'URL gambar tidak valid' })
+  @MaxLength(500)
+  imageUrl?: string | null;
+
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -160,6 +175,8 @@ export class UpdateCategoryDto {
   @IsOptional() @IsIn(['BAR', 'KITCHEN', 'NONE']) station?: 'BAR' | 'KITCHEN' | 'NONE';
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @MaxLength(40, { each: true }) quickNotes?: string[];
   @IsOptional() @IsBoolean() isSignature?: boolean;
+  @IsOptional() @ValidateIf((_, v) => v !== null) @Transform(trim) @IsString() @MaxLength(120) description?: string | null;
+  @IsOptional() @ValidateIf((_, v) => v !== null) @Matches(IMAGE_URL, { message: 'URL gambar tidak valid' }) @MaxLength(500) imageUrl?: string | null;
   @IsOptional() @IsInt() @Min(0) @Max(9999) sortOrder?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
@@ -677,6 +694,7 @@ export class SettingsDto {
   @IsOptional() @Transform(trim) @IsString() @Length(1, 60) orgName?: string;
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsString() @MaxLength(120) tagline?: string | null;
   @IsOptional() @ValidateIf((_, v) => v !== null) @IsString() @MaxLength(60) instagram?: string | null;
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsString() @MaxLength(60) tiktok?: string | null;
   @IsOptional() @IsIn([1, 100, 500, 1000]) roundingUnit?: number;
   @IsOptional() @IsIn(['DOWN', 'NEAREST', 'UP']) roundingMode?: 'DOWN' | 'NEAREST' | 'UP';
   @IsOptional() @IsInt() @Min(0) @Max(10000) maxCashierDiscountBp?: number;
