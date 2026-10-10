@@ -2,6 +2,7 @@
 import { dateTime, rp } from '@robucca/core';
 import { useEffect, useState } from 'react';
 import { requireApproval } from '../../components/approve';
+import { typeName } from '../../data/master';
 import { Icon } from '../../lib/icons';
 import { S, can } from '../../state';
 import { Drawer, openLayer, promptBox, toast, useLayerClose } from '../../ui/overlay';
@@ -111,7 +112,7 @@ export default function TransactionsPage() {
                             <td>{o.branchName}</td>
                             <td>{o.cashierName ?? '-'}</td>
                             <td>
-                              {o.channelName ?? o.type}
+                              {o.channelName ?? typeName(o.type)}
                               {o.tableNumber ? <span className="sub">Meja {o.tableNumber}</span> : null}
                             </td>
                             <td>{o.payments.map((p) => p.name).join(' + ') || '—'}</td>
@@ -207,7 +208,7 @@ function TxDrawer({ o }: { o: TxDetail }) {
     >
       <div className="row wrap" style={{ gap: 6, marginBottom: 12 }}>
         <StatusTag s={o.status} />
-        <span className="tag">{o.channel?.name ?? o.type}</span>
+        <span className="tag">{o.channel?.name ?? typeName(o.type)}</span>
         {o.source === 'PWA' && <span className="tag blue">Pesan online</span>}
         {o.tableNumber && <span className="tag">Meja {o.tableNumber}</span>}
         {o.device && <span className="tag">T{o.device.terminalNo}</span>}

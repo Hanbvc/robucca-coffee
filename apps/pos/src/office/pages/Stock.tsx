@@ -411,15 +411,15 @@ function ItemBody({ close }: { close: (v?: boolean) => void }) {
       <div className="col">
         <label className="field">
           <span>Nama bahan</span>
-          <input className="input" value={d.name} autoFocus placeholder="mis. Susu UHT" onChange={(e) => setD({ ...d, name: e.target.value })} />
+          <input className="input" id="i-name" value={d.name} autoFocus placeholder="mis. Susu UHT" onChange={(e) => setD({ ...d, name: e.target.value })} />
         </label>
         <label className="field">
           <span>SKU</span>
-          <input className="input" value={d.sku} placeholder="SUSU-UHT" style={{ textTransform: 'uppercase' }} onChange={(e) => setD({ ...d, sku: e.target.value })} />
+          <input className="input" id="i-sku" value={d.sku} placeholder="SUSU-UHT" style={{ textTransform: 'uppercase' }} onChange={(e) => setD({ ...d, sku: e.target.value })} />
         </label>
         <label className="field">
           <span>Satuan</span>
-          <select className="select" value={d.unit} onChange={(e) => setD({ ...d, unit: e.target.value as Unit })}>
+          <select className="select" id="i-unit" value={d.unit} onChange={(e) => setD({ ...d, unit: e.target.value as Unit })}>
             <option value="GRAM">Gram</option>
             <option value="MILLILITER">Mililiter</option>
             <option value="PIECE">Buah / pcs</option>

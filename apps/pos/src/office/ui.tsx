@@ -92,6 +92,7 @@ export function useLoad<T>(fn: () => Promise<T>, key: unknown[]): Loaded<T> {
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
   const seq = useRef(0);
+  useFilter(); // render ulang saat periode/cabang berubah agar data dimuat ulang
   useEffect(() => {
     const my = ++seq.current;
     setLoading(true);

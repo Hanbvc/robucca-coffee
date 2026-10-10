@@ -78,7 +78,7 @@ export default function DashboardPage() {
               <>
                 <div className="kpis">
                   <div className="kpi hero" data-kpi="total">
-                    <div className="k-label">Omzet{multi ? ' semua cabang terpilih' : ''}</div>
+                    <div className="k-label">Omzet{multi ? ' semua cabang' : ''}</div>
                     <div className="k-value">{rp(k.total)}</div>
                     <Delta pct={dp.total} vs={vs} />
                     <div className="k-sub">

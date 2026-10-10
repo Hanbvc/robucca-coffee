@@ -28,10 +28,36 @@ const LABEL: Record<string, [string, string]> = {
 };
 const label = (a: string): [string, string] => LABEL[a] ?? [a, ''];
 const money = (v: unknown) => (typeof v === 'number' ? rp(v) : String(v ?? ''));
+const ROLE: Record<string, string> = { SUPER_ADMIN: 'Pemilik', BRANCH_MANAGER: 'Manajer', CASHIER: 'Kasir', KITCHEN: 'Dapur/Bar' };
+const FIELD: Record<string, string> = {
+  name: 'nama', role: 'peran', branchIds: 'cabang', isActive: 'aktif', email: 'email', basePrice: 'harga', categoryId: 'kategori', station: 'stasiun', imageUrl: 'foto',
+  description: 'deskripsi', isSignature: 'signature', sortOrder: 'urutan', value: 'nilai', type: 'jenis', validFrom: 'mulai', validUntil: 'sampai', requiresApproval: 'persetujuan',
+  taxRateBp: 'pajak', serviceRateBp: 'servis', markupBp: 'markup', timezone: 'zona waktu', address: 'alamat', phone: 'telepon',
+};
+const num = (v: unknown) => (v == null ? '' : Number(v).toLocaleString('id-ID', { maximumFractionDigits: 3 }));
+/** Ringkas nilai sederhana; ID & objek panjang tidak ditampilkan. */
+function plain(d: Record<string, unknown>, skip: string[] = []): string {
+  return Object.entries(d)
+    .filter(([k, v]) => !skip.includes(k) && !/(^id$|Id$|Ids$)/.test(k) && v !== null && v !== undefined && typeof v !== 'object')
+    .map(([k, v]) => `${FIELD[k] ?? k}: ${typeof v === 'boolean' ? (v ? 'ya' : 'tidak') : String(v)}`)
+    .join(' · ');
+}
+function changed(c: unknown): string {
+  if (!c || typeof c !== 'object') return '';
+  const ks = Object.keys(c as object).filter((k) => !/Ids?$/.test(k) || k === 'branchIds');
+  return ks.length ? `diubah: ${ks.map((k) => FIELD[k] ?? k).join(', ')}` : '';
+}
+type Line = { name?: string; before?: unknown; after?: unknown; change?: unknown; system?: unknown; counted?: unknown; difference?: unknown; quantity?: unknown };
+function lines(d: Record<string, unknown>, f: (l: Line) => string): string {
+  const ls = Array.isArray(d.lines) ? (d.lines as Line[]) : [];
+  const shown = ls.slice(0, 3).map(f).join(' · ');
+  return ls.length > 3 ? `${shown} · +${ls.length - 3} bahan lain` : shown;
+}
 
 function detail(a: Row): string {
   const d = a.detail ?? {};
   const s = (k: string) => (d[k] == null ? '' : String(d[k]));
+  const note = d.note ? `“${s('note')}”` : '';
   switch (a.action) {
     case 'order.void':
     case 'order.refund':
@@ -43,13 +69,24 @@ function detail(a: Row): string {
     case 'menu.price.branch':
     case 'menu.price.update':
       return [s('name'), d.from !== undefined || d.to !== undefined ? `${d.from == null ? 'harga pusat' : money(d.from)} → ${d.to == null ? 'harga pusat' : money(d.to)}` : '', d.isAvailable !== undefined ? (d.isAvailable ? 'tersedia' : 'tidak tersedia') : ''].filter(Boolean).join(' · ');
+    case 'stock.receive':
+    case 'stock.waste':
+      return [lines(d, (l) => `${l.name ?? ''} ${Number(l.change) >= 0 ? '+' : ''}${num(l.change)} (jadi ${num(l.after)})`), note].filter(Boolean).join(' · ');
+    case 'stock.adjust':
+      return [lines(d, (l) => `${l.name ?? ''} ${num(l.system)} → ${num(l.counted)} (${Number(l.difference) > 0 ? '+' : ''}${num(l.difference)})`), note].filter(Boolean).join(' · ');
+    case 'stock.transfer':
+      return [`${s('from')} → ${s('to')}`, lines(d, (l) => `${l.name ?? ''} ${num(l.quantity)}`), note].filter(Boolean).join(' · ');
+    case 'menu.product.update':
+      // formulir menu mengirim semua kolom, jadi daftar "diubah" tidak bermakna; harga tercatat terpisah
+      return [s('name'), d.changes && typeof d.changes === 'object' && 'basePrice' in d.changes ? `harga ${money((d.changes as Record<string, unknown>).basePrice)}` : ''].filter(Boolean).join(' · ');
+    case 'staff.create':
+      return [s('name'), ROLE[s('role')] ?? s('role'), d.pin ? 'dengan PIN' : ''].filter(Boolean).join(' · ');
+    case 'promo.create':
+    case 'promo.update':
+      return [s('name'), d.type === 'PERCENT' && d.value != null ? `${Number(d.value) / 100}%` : d.value != null ? money(d.value) : '', d.requiresApproval ? 'perlu persetujuan' : '', changed(d.changes)].filter(Boolean).join(' · ');
     default: {
       const name = s('name') || s('item') || s('sku');
-      const rest = Object.entries(d)
-        .filter(([k]) => !['name', 'item'].includes(k))
-        .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
-        .join(' · ');
-      return [name, rest].filter(Boolean).join(' · ').slice(0, 220);
+      return [name, plain(d, ['name', 'item']), changed(d.changes)].filter(Boolean).join(' · ').slice(0, 220);
     }
   }
 }
