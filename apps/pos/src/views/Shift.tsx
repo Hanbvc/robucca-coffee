@@ -103,6 +103,15 @@ export function amountDialog(o: AmountOpts): Promise<{ amount: number; reason: s
 /** Buka shift baru di perangkat ini. */
 export async function openShiftDialog(): Promise<Shift | null> {
   const b = branch();
+  // Mode server: terminal ini mungkin masih punya shift terbuka di server (mis. perangkat dipasang ulang).
+  if (S.be.isServer) {
+    const open = await S.be.resumeServerShift().catch(() => null);
+    if (open) {
+      setShift(open);
+      toast(`Melanjutkan shift terbuka dari server · dibuka ${open.openedByName}`);
+      return open;
+    }
+  }
   const r = await amountDialog({
     title: 'Buka shift kasir',
     sub: `${b.name} · Terminal ${S.be.device!.terminalNo}. Hitung uang di laci sebagai kas awal.`,

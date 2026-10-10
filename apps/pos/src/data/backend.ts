@@ -28,6 +28,16 @@ export interface Approval {
   at: number;
 }
 
+interface ServerOpenShift {
+  id: string;
+  status: 'OPEN' | 'CLOSED';
+  businessDate: string;
+  openedAt: string;
+  openedBy: { id: string; name: string };
+  openingCash: number;
+  cashMovements: { id: string; type: 'CASH_IN' | 'CASH_OUT'; amount: number; reason: string | null; createdAt: string; createdBy: { id: string; name: string } | null }[];
+}
+
 type AnyDoc = { id: string; version: number; updatedAt: number };
 
 interface SyncResponse {
@@ -128,6 +138,33 @@ export class Backend {
     await db.setMeta('syncErrors', []);
     // Tarik feed sekali sebelum berjualan: nomor struk terminal yang dipasang ulang dilanjutkan, tidak dobel.
     await this.pullFeed().catch((e: unknown) => console.warn('feed awal gagal', e));
+    // Shift yang masih terbuka di server untuk terminal ini dilanjutkan (tidak membuka shift ganda).
+    await this.resumeServerShift().catch((e: unknown) => console.warn('shift terbuka gagal diambil', e));
+  }
+
+  /** Ambil shift OPEN terminal ini dari server (GET /pos/shift/open) dan simpan lokal beserta kas masuk/keluarnya. */
+  async resumeServerShift(): Promise<Shift | null> {
+    const d = this.device;
+    if (!this.isServer || !this.api || !d?.branchId) return null;
+    const r = await this.api.get<{ shift: ServerOpenShift | null }>('/pos/shift/open', { timeout: 8000 });
+    const s = r.shift;
+    if (!s || s.status !== 'OPEN') return null;
+    const local = await db.get<Shift>('shifts', s.id);
+    if (local && (local.status === 'CLOSED' || (await db.pending(`shifts:${s.id}`)))) return local.status === 'OPEN' ? local : null;
+    const now = Date.now();
+    const shift: Shift = {
+      id: s.id, branchId: d.branchId, deviceId: d.id, terminalNo: d.terminalNo, bizDate: String(s.businessDate).slice(0, 10), status: 'OPEN',
+      openedAt: Date.parse(s.openedAt), openedById: s.openedBy.id, openedByName: s.openedBy.name, openingCash: s.openingCash,
+      version: local?.version ?? 1, updatedAt: now,
+    };
+    await db.put('shifts', [shift], false);
+    const moves: CashMove[] = s.cashMovements.map((c) => ({
+      id: c.id, branchId: d.branchId!, shiftId: s.id, type: c.type, amount: c.amount, reason: c.reason ?? '',
+      createdById: c.createdBy?.id ?? '', createdByName: c.createdBy?.name ?? '', createdAt: Date.parse(c.createdAt), version: 1, updatedAt: now,
+    }));
+    if (moves.length) await db.put('cashMoves', moves, false);
+    bus.emit('shifts', { ids: [s.id], remote: true }, false);
+    return shift;
   }
 
   /** Mode demo: snapshot master bawaan (tanpa server) + riwayat contoh. */
