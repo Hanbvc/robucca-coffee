@@ -1,6 +1,12 @@
-@import "tailwindcss";
+/* Tailwind tanpa preflight: tampilan utama memakai pos.css (identitas POS lama), utilitas Tailwind untuk tata letak kecil. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "./styles/pos.css";
 
 @theme {
   --color-brand: #01512c;
   --color-cream: #faeeda;
+  --font-serif: "Londrina Solid", "Arial Narrow", Impact, sans-serif;
+  --font-sans: "Poppins", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }

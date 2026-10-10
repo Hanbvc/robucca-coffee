@@ -27,28 +27,31 @@ export class DevicesController {
   @Get('devices')
   @UseGuards(StaffGuard)
   @RequirePermission('device.manage')
-  list() {
-    return this.devices.list();
+  list(@CurrentStaff() staff: StaffCtx) {
+    return this.devices.list(staff.branchIds);
   }
 
   @Post('devices')
   @UseGuards(StaffGuard)
   @RequirePermission('device.manage')
-  create(@Body() body: CreateDeviceDto, @CurrentStaff() staff: StaffCtx) {
+  async create(@Body() body: CreateDeviceDto, @CurrentStaff() staff: StaffCtx) {
+    await this.devices.assertAccess(staff, { branchCode: body.branchCode });
     return this.devices.create(body, staff.id);
   }
 
   @Post('devices/:id/pairing-code')
   @UseGuards(StaffGuard)
   @RequirePermission('device.manage')
-  pairingCode(@Param('id', ParseUUIDPipe) id: string, @CurrentStaff() staff: StaffCtx) {
+  async pairingCode(@Param('id', ParseUUIDPipe) id: string, @CurrentStaff() staff: StaffCtx) {
+    await this.devices.assertAccess(staff, { deviceId: id });
     return this.devices.newPairingCode(id, staff.id);
   }
 
   @Delete('devices/:id')
   @UseGuards(StaffGuard)
   @RequirePermission('device.manage')
-  revoke(@Param('id', ParseUUIDPipe) id: string, @CurrentStaff() staff: StaffCtx) {
+  async revoke(@Param('id', ParseUUIDPipe) id: string, @CurrentStaff() staff: StaffCtx) {
+    await this.devices.assertAccess(staff, { deviceId: id });
     return this.devices.revoke(id, staff.id);
   }
 }

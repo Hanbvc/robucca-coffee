@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Body, Controller, Get, HttpCode, Ip, Post, UnauthorizedException, UseGuards } from '@nestjs/common';
 import bcrypt from 'bcryptjs';
 import {
@@ -67,7 +68,7 @@ export class AuthController {
       if (!(p.includes('*') || p.includes(body.permission))) continue;
       if (await bcrypt.compare(body.pin, c.pinHash!)) {
         pinLimit.ok(key);
-        const approval = sign({ sub: c.id, perm: body.permission, dev: device.id, req: staff.id }, APPROVAL_TTL_SECONDS);
+        const approval = sign({ sub: c.id, perm: body.permission, dev: device.id, req: staff.id, jti: randomUUID() }, APPROVAL_TTL_SECONDS);
         return { approval, approver: { id: c.id, name: c.name } };
       }
     }

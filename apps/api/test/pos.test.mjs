@@ -65,7 +65,12 @@ test('master: menu cabang, staf dengan hash PIN, ETag', { skip }, async () => {
   assert.equal(master.branch.code, 'IJN');
   assert.equal(master.menu.reduce((a, c) => a + c.products.length, 0), 95);
   assert.ok(master.staff.find((s) => s.name === 'Sari').pinHash.startsWith('$2'));
-  assert.ok(!master.staff.some((s) => s.name === 'Pemilik' && !s.pinHash));
+  // Hash PIN penyetuju (manajer/pemilik) tidak dikirim ke perangkat: hanya bisa login & menyetujui saat online.
+  const dewi = master.staff.find((s) => s.name === 'Dewi');
+  assert.equal(dewi.pinHash, null);
+  assert.equal(dewi.onlineOnly, true);
+  assert.equal(master.staff.find((s) => s.name === 'Pemilik (demo)').pinHash, null);
+  assert.equal(master.staff.find((s) => s.name === 'Sari').onlineOnly, false);
   const again = await fetch(base + '/pos/master', { headers: { ...dev(), 'if-none-match': r.headers.get('etag') } });
   assert.equal(again.status, 304);
 });
@@ -154,6 +159,34 @@ test('diskon besar disetujui manajer lewat PIN (token persetujuan)', { skip }, a
   assert.equal(r.body.orders[0].status, 'saved', JSON.stringify(r.body.orders));
   const saved = await db.order.findUnique({ where: { id: o.id } });
   assert.equal(saved.discountApprovedById, ids.dewi);
+});
+
+test('persetujuan offline (hanya ID manajer, tanpa token server) ditolak; token hanya untuk satu pesanan', { skip }, async () => {
+  const latte = product('kopi-susu-essentials');
+  const pays = () => [{ id: randomUUID(), optionCode: 'qris', amount: latte.price, at: new Date().toISOString() }];
+  const off = order({ discount: { type: 'PERCENT', value: 5000 }, payments: pays(), discountApprovedById: ids.dewi });
+  const r = await call('POST', '/pos/sync', { orders: [off] }, dev());
+  assert.equal(r.body.orders[0].status, 'rejected');
+  assert.match(r.body.orders[0].errors[0], /offline tidak diterima/);
+  const appr = await call('POST', '/pos/approve', { pin: '2222', permission: 'discount.approve' }, ses());
+  const a = order({ discount: { type: 'PERCENT', value: 5000 }, payments: pays(), discountApproval: appr.body.approval });
+  const ra = await call('POST', '/pos/sync', { orders: [a] }, dev());
+  assert.equal(ra.body.orders[0].status, 'saved', JSON.stringify(ra.body) + JSON.stringify(appr));
+  const b = order({ discount: { type: 'PERCENT', value: 5000 }, payments: pays(), discountApproval: appr.body.approval });
+  const reuse = await call('POST', '/pos/sync', { orders: [b] }, dev());
+  assert.equal(reuse.body.orders[0].status, 'rejected');
+  assert.match(reuse.body.orders[0].errors[0], /sudah dipakai/);
+});
+
+test('shift kedua untuk terminal yang sama ditolak; shift terbuka bisa dipulihkan perangkat', { skip }, async () => {
+  const dup = randomUUID();
+  const r = await call('POST', '/pos/sync', { shifts: [{ id: dup, status: 'OPEN', openedAt: new Date().toISOString(), openingCash: 100000, openedById: ids.sari }] }, dev());
+  assert.equal(r.body.shifts[0].status, 'rejected');
+  assert.match(r.body.shifts[0].errors[0], /masih punya shift terbuka/);
+  const open = await call('GET', '/pos/shift/open', null, dev());
+  assert.equal(open.status, 200);
+  assert.equal(open.body.shift.id, ids.shift);
+  assert.equal(open.body.shift.openingCash, 200000);
 });
 
 test('tagihan terbuka diubah di versi berikut; versi lama = konflik; status dapur dipertahankan', { skip }, async () => {
