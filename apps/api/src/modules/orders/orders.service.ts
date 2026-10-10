@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { can, canBranch, type DeviceCtx, type StaffCtx } from '../../common/auth';
+import { AuthService, can, canBranch, type DeviceCtx, type StaffCtx } from '../../common/auth';
 import { verify } from '../../common/tokens';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -14,6 +14,7 @@ export class OrdersService {
     private readonly audit: AuditService,
     private readonly stock: StockService,
     private readonly events: EventsService,
+    private readonly auth: AuthService,
   ) {}
 
   async get(id: string, staff: StaffCtx) {
@@ -29,8 +30,11 @@ export class OrdersService {
   async refund(id: string, reason: string, approval: string | undefined, staff: StaffCtx, device: DeviceCtx | undefined) {
     let approverId: string | null = can(staff, 'order.refund.approve') ? staff.id : null;
     if (!approverId && approval) {
-      const p = verify<{ sub: string; perm: string; dev: string }>(approval);
-      if (!p || p.perm !== 'order.refund.approve' || (device && p.dev !== device.id)) throw new ForbiddenException('Persetujuan manajer tidak sah atau kedaluwarsa');
+      const p = verify<{ sub: string; perm: string; dev: string; typ?: string }>(approval);
+      if (!p || p.typ !== 'appr' || p.perm !== 'order.refund.approve' || (device && p.dev !== device.id)) throw new ForbiddenException('Persetujuan manajer tidak sah atau kedaluwarsa');
+      // Penyetuju diperiksa ulang: masih aktif, masih berhak, dan cabangnya sama.
+      const a = await this.auth.staffById(p.sub);
+      if (!a || !can(a, 'order.refund.approve')) throw new ForbiddenException('Penyetuju tidak berhak');
       approverId = p.sub;
     }
     if (!approverId) throw new ForbiddenException('Refund butuh persetujuan manajer (PIN)');

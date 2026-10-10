@@ -5,11 +5,11 @@ import type { DeviceCtx } from '../../common/auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EventsService } from '../events/events.service';
+import { Actors, APPROVER_PERMS } from './actors';
 import { OrderSyncService, type SyncResult } from './order-sync.service';
 import type { CashMovementDocDto, FulfillmentDocDto, KitchenDocDto, ShiftDocDto, SyncDto } from './sync.dto';
 
-/** Hak yang membuat staf menjadi penyetuju (hash PIN-nya tidak dikirim ke perangkat). */
-export const APPROVER_PERMS = ['*', 'order.void.approve', 'order.refund.approve', 'discount.approve'];
+export { APPROVER_PERMS };
 
 type DocResult = { id: string; status: 'saved' | 'duplicate' | 'rejected'; errors?: string[] };
 
@@ -47,12 +47,14 @@ export class PosService {
 
   /** Satu kiriman sinkron. Urutan: shift → kas → pesanan → status dapur → log. Tiap dokumen diproses sendiri-sendiri. */
   async sync(body: SyncDto, device: DeviceCtx) {
+    // Staf yang terbukti login online di perangkat ini (lihat actors.ts).
+    const actors = Actors.fromSessions(body.staffSessions, device);
     const shifts: DocResult[] = [];
-    for (const s of body.shifts ?? []) shifts.push(await this.shift(s, device));
+    for (const s of body.shifts ?? []) shifts.push(await this.shift(s, device, actors));
     const cashMovements: DocResult[] = [];
-    for (const c of body.cashMovements ?? []) cashMovements.push(await this.cash(c, device));
+    for (const c of body.cashMovements ?? []) cashMovements.push(await this.cash(c, device, actors));
     const orders: SyncResult[] = [];
-    for (const o of body.orders ?? []) orders.push(await this.orders.upsert(o, device));
+    for (const o of body.orders ?? []) orders.push(await this.orders.upsert(o, device, actors));
     // Tutup shift dihitung ulang setelah pesanan & kas di kiriman yang sama masuk.
     for (const s of body.shifts ?? []) if (s.status === 'CLOSED') await this.closeShiftTotals(s.id);
     const kitchen: DocResult[] = [];
@@ -60,7 +62,10 @@ export class PosService {
     for (const f of body.fulfillment ?? []) kitchen.push(await this.fulfillment(f, device));
     let audit = 0;
     for (const a of body.audit ?? []) {
-      await this.audit.log({ action: `pos.${a.action}`, entity: 'Device', entityId: device.id, branchId: device.branchId, actorId: a.actorId ?? null, detail: { ...(a.detail ?? {}), at: a.at } as Prisma.InputJsonValue });
+      // Pelaku yang tidak bisa dibuktikan tidak dicatat sebagai pelaku; klaim perangkat tetap tersimpan di detail.
+      const actor = a.actorId ? await this.actor(a.actorId, device, actors) : null;
+      const detail = { ...(a.detail ?? {}), at: a.at, ...(a.actorId && !actor ? { claimedActorId: a.actorId } : {}) };
+      await this.audit.log({ action: `pos.${a.action}`, entity: 'Device', entityId: device.id, branchId: device.branchId, actorId: actor?.id ?? null, detail: detail as Prisma.InputJsonValue });
       audit++;
     }
     const changed = [...orders, ...kitchen, ...shifts, ...cashMovements].some((r) => r.status === 'saved');
@@ -68,15 +73,37 @@ export class PosService {
     return { shifts, cashMovements, orders, kitchen, audit, serverTime: new Date().toISOString() };
   }
 
-  private async shift(s: ShiftDocDto, device: DeviceCtx): Promise<DocResult> {
+  /** Staf aktif cabang perangkat yang boleh tercatat sebagai pelaku; null bila tidak. */
+  private async actor(id: string, device: DeviceCtx, actors: Actors): Promise<{ id: string; name: string; ok: boolean } | null> {
+    const u = await this.prisma.db.user.findUnique({ where: { id }, select: { id: true, name: true, isActive: true, role: { select: { code: true, permissions: true } }, branches: { select: { branchId: true } } } });
+    if (!u || !u.isActive) return null;
+    const inBranch = u.role.code === 'SUPER_ADMIN' || u.branches.some((b) => b.branchId === device.branchId);
+    if (!inBranch) return null;
+    return actors.allows({ id: u.id, permissions: u.role.permissions }) ? { id: u.id, name: u.name, ok: true } : null;
+  }
+
+  /** Alasan penolakan pelaku (tidak dikenal di cabang, atau penyetuju tanpa login online). */
+  private async actorError(id: string, device: DeviceCtx, actors: Actors, what: string): Promise<string | null> {
+    if (await this.actor(id, device, actors)) return null;
+    const u = await this.prisma.db.user.findUnique({ where: { id }, select: { name: true, isActive: true, role: { select: { code: true } }, branches: { select: { branchId: true } } } });
+    if (u?.isActive && (u.role.code === 'SUPER_ADMIN' || u.branches.some((b) => b.branchId === device.branchId))) return Actors.reason(u.name);
+    return `${what} tidak dikenal di cabang ini`;
+  }
+
+  private async shift(s: ShiftDocDto, device: DeviceCtx, actors: Actors): Promise<DocResult> {
     const branchId = device.branchId;
     if (!branchId) return { id: s.id, status: 'rejected', errors: ['Perangkat kantor tidak punya shift'] };
     const prev = await this.prisma.db.shift.findUnique({ where: { id: s.id } });
     if (prev && prev.branchId !== branchId) return { id: s.id, status: 'rejected', errors: ['Shift milik cabang lain'] };
     if (prev?.status === 'CLOSED') return { id: s.id, status: 'duplicate' };
-    const opener = await this.prisma.db.user.findUnique({ where: { id: s.openedById }, include: { branches: true, role: true } });
-    if (!opener || (opener.role.code !== 'SUPER_ADMIN' && !opener.branches.some((b) => b.branchId === branchId))) {
-      return { id: s.id, status: 'rejected', errors: ['Staf pembuka shift tidak dikenal di cabang ini'] };
+    // Pembuka dicek saat shift pertama kali diterima; penutup dicek saat shift ditutup.
+    if (!prev) {
+      const err = await this.actorError(s.openedById, device, actors, 'Staf pembuka shift');
+      if (err) return { id: s.id, status: 'rejected', errors: [err] };
+    }
+    if (s.status === 'CLOSED' && s.closedById) {
+      const err = await this.actorError(s.closedById, device, actors, 'Staf penutup shift');
+      if (err) return { id: s.id, status: 'rejected', errors: [err] };
     }
     // Satu terminal hanya boleh punya satu shift terbuka (mis. perangkat dipasang ulang lalu membuka shift baru).
     if (!prev && s.status === 'OPEN') {
@@ -101,7 +128,17 @@ export class PosService {
       differenceNote: s.differenceNote?.trim() || null,
     };
     if (prev) await this.prisma.db.shift.update({ where: { id: s.id }, data });
-    else await this.prisma.db.shift.create({ data: { id: s.id, branchId, deviceId: device.id, openedById: s.openedById, openedAt: new Date(s.openedAt), ...data } });
+    else {
+      try {
+        await this.prisma.db.shift.create({ data: { id: s.id, branchId, deviceId: device.id, openedById: s.openedById, openedAt: new Date(s.openedAt), ...data } });
+      } catch (e) {
+        // Indeks unik parsial "satu shift OPEN per perangkat": dua sinkron bersamaan dari perangkat yang sama.
+        if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === 'P2002') {
+          return { id: s.id, status: 'rejected', errors: [`Terminal ${device.terminalNo} masih punya shift terbuka. Lanjutkan shift itu atau tutup dulu.`] };
+        }
+        throw e;
+      }
+    }
     await this.audit.log({
       action: s.status === 'CLOSED' ? 'shift.close' : 'shift.open', entity: 'Shift', entityId: s.id, branchId,
       actorId: s.closedById ?? s.openedById, detail: { openingCash: s.openingCash, countedCash: s.countedCash ?? null, note: s.differenceNote ?? null },
@@ -123,11 +160,13 @@ export class PosService {
     await this.prisma.db.shift.update({ where: { id: shiftId }, data: { expectedCash } });
   }
 
-  private async cash(c: CashMovementDocDto, device: DeviceCtx): Promise<DocResult> {
+  private async cash(c: CashMovementDocDto, device: DeviceCtx, actors: Actors): Promise<DocResult> {
     const shift = await this.prisma.db.shift.findUnique({ where: { id: c.shiftId } });
     if (!shift || shift.branchId !== device.branchId) return { id: c.id, status: 'rejected', errors: ['Shift tidak dikenal di cabang ini'] };
     const exists = await this.prisma.db.cashMovement.findUnique({ where: { id: c.id } });
     if (exists) return { id: c.id, status: 'duplicate' };
+    const err = await this.actorError(c.createdById, device, actors, 'Staf pencatat kas');
+    if (err) return { id: c.id, status: 'rejected', errors: [err] };
     await this.prisma.db.cashMovement.create({
       data: { id: c.id, branchId: shift.branchId, shiftId: c.shiftId, type: c.type, amount: c.amount, reason: c.reason.trim(), createdById: c.createdById, createdAt: new Date(c.createdAt) },
     });

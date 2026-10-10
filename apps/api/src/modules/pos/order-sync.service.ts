@@ -16,6 +16,7 @@ import { sha256, verify } from '../../common/tokens';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { StockService, type SoldItem } from '../stock/stock.service';
+import { Actors } from './actors';
 import type { DiscountDto, OrderDocDto } from './sync.dto';
 
 export type SyncResult =
@@ -47,12 +48,12 @@ export class OrderSyncService {
     private readonly stock: StockService,
   ) {}
 
-  async upsert(doc: OrderDocDto, device: DeviceCtx): Promise<SyncResult> {
+  async upsert(doc: OrderDocDto, device: DeviceCtx, actors: Actors = Actors.fromSessions([], device)): Promise<SyncResult> {
     if (!device.branchId) return { id: doc.id, status: 'rejected', errors: ['Perangkat kantor tidak bisa membuat transaksi'] };
     const branchId = device.branchId;
     for (let attempt = 1; ; attempt++) {
       try {
-        return await this.prisma.db.$transaction(async (tx) => this.save(tx, doc, device, branchId), { isolationLevel: 'Serializable', timeout: 15_000 });
+        return await this.prisma.db.$transaction(async (tx) => this.save(tx, doc, device, branchId, actors), { isolationLevel: 'Serializable', timeout: 15_000 });
       } catch (e) {
         if (e instanceof Reject) return { id: doc.id, status: 'rejected', errors: e.errors };
         const code = e && typeof e === 'object' && 'code' in e ? (e as { code: string }).code : '';
@@ -64,7 +65,7 @@ export class OrderSyncService {
     }
   }
 
-  private async save(tx: Tx, doc: OrderDocDto, device: DeviceCtx, branchId: string): Promise<SyncResult> {
+  private async save(tx: Tx, doc: OrderDocDto, device: DeviceCtx, branchId: string, actors: Actors): Promise<SyncResult> {
     const existing = await tx.order.findUnique({
       where: { id: doc.id },
       select: {
@@ -89,6 +90,9 @@ export class OrderSyncService {
       this.staff(tx, doc.cashierId),
     ]);
     if (!cashier || !canBranch(cashier, branchId)) throw new Reject(['Kasir tidak dikenal di cabang ini']);
+    // Manajer/pemilik sebagai kasir hanya bila ia login online di perangkat ini (lihat actors.ts):
+    // tanpa ini kasir bisa mengisi ID manajer lalu "menyetujui sendiri" void/diskon.
+    if (!actors.allows(cashier)) throw new Reject([Actors.reason(cashier.name)]);
 
     // --- Konfigurasi pajak: dari cabang saat pesanan dibuat, lalu tetap (tarif bisa berubah kemudian).
     const cfg: TaxConfig = existing
@@ -177,14 +181,39 @@ export class OrderSyncService {
     }
 
     // --- Void
+    // Seperti POS lama, membatalkan tagihan (lunas atau belum) selalu butuh persetujuan manajer.
     let voidedById: string | null = null;
     if (doc.status === 'VOIDED') {
       if (!doc.voidReason?.trim()) throw new Reject(['Alasan void wajib diisi']);
-      if (wasPaid || doc.payments.length) {
-        voidedById = await this.approver(tx, branchId, device, 'order.void.approve', doc.voidApproval, doc.voidedById, cashier.id, doc.id, 'void');
-        if (!voidedById && can(cashier, 'order.void.approve')) voidedById = cashier.id;
-        if (!voidedById) throw new Reject(['Void pesanan lunas butuh persetujuan manajer (PIN)']);
-      } else voidedById = doc.voidedById ?? cashier.id;
+      voidedById = await this.approver(tx, branchId, device, 'order.void.approve', doc.voidApproval, doc.voidedById, cashier.id, doc.id, 'void');
+      if (!voidedById && can(cashier, 'order.void.approve')) voidedById = cashier.id;
+      if (!voidedById) throw new Reject([wasPaid || doc.payments.length ? 'Void pesanan lunas butuh persetujuan manajer (PIN)' : 'Membatalkan tagihan butuh persetujuan manajer (PIN)']);
+    }
+
+    // Item yang sudah dikirim ke dapur/bar lalu dibatalkan: butuh persetujuan manajer (seperti POS lama).
+    // Item yang belum dikirim cukup dihapus di keranjang; bila tetap dikirim sebagai "batal", pelakunya kasir.
+    const prevItems = new Map(
+      (await tx.orderItem.findMany({ where: { orderId: doc.id }, select: { id: true, sentToKitchenAt: true, voidedAt: true, voidedById: true, kitchenStatus: true, kitchenDoneAt: true } })).map((k) => [k.id, k]),
+    );
+    const itemVoidBy = new Map<string, string>();
+    if (!wasPaid) {
+      for (const { it, p } of valid) {
+        if (!it.voided) continue;
+        const prevItem = prevItems.get(it.id);
+        if (prevItem?.voidedAt) {
+          itemVoidBy.set(it.id, prevItem.voidedById ?? cashier.id);
+          continue;
+        }
+        const sent = !!(prevItem?.sentToKitchenAt || it.sentToKitchenAt);
+        if (!sent) {
+          itemVoidBy.set(it.id, cashier.id);
+          continue;
+        }
+        let by = await this.approver(tx, branchId, device, 'order.void.approve', it.voided.approval, it.voided.byId, cashier.id, doc.id, 'line.void');
+        if (!by && can(cashier, 'order.void.approve')) by = cashier.id;
+        if (!by) throw new Reject([`Membatalkan ${p.menu.name} yang sudah dikirim ke dapur butuh persetujuan manajer (PIN)`]);
+        itemVoidBy.set(it.id, by);
+      }
     }
 
     if (doc.shiftId) {
@@ -256,9 +285,7 @@ export class OrderSyncService {
     if (canEditLines) {
       const byId = new Map(amounts.map((a) => [a.id, a]));
       // Status dapur dipertahankan untuk baris yang sudah ada (tiket yang sudah selesai tidak muncul lagi).
-      const prevKitchen = new Map(
-        (await tx.orderItem.findMany({ where: { orderId: doc.id }, select: { id: true, kitchenStatus: true, kitchenDoneAt: true } })).map((k) => [k.id, k]),
-      );
+      const prevKitchen = prevItems;
       await tx.orderItem.deleteMany({ where: { orderId: doc.id } });
       for (const { it, p, mods } of valid) {
         const a = byId.get(it.id);
@@ -280,7 +307,7 @@ export class OrderSyncService {
             kitchenDoneAt: prevKitchen.get(it.id)?.kitchenDoneAt ?? null,
             voidedAt: it.voided ? new Date(it.voided.at) : null,
             voidReason: it.voided?.reason ?? null,
-            voidedById: it.voided ? (it.voided.byId ?? cashier.id) : null,
+            voidedById: it.voided ? (itemVoidBy.get(it.id) ?? cashier.id) : null,
             modifiers: {
               create: mods.map((m) => ({ modifierOptionId: m.optionId, groupName: m.groupName, optionName: m.optionName, priceDelta: m.priceDelta })),
             },
@@ -362,8 +389,8 @@ export class OrderSyncService {
     token: string | undefined, approverId: string | undefined, cashierId: string, orderId: string, what: string,
   ): Promise<string | null> {
     if (token) {
-      const p = verify<{ sub: string; perm: string; dev: string }>(token, APPROVAL_GRACE_S);
-      if (!p || p.perm !== perm || p.dev !== device.id) throw new Reject(['Persetujuan manajer tidak sah atau kedaluwarsa']);
+      const p = verify<{ sub: string; perm: string; dev: string; typ?: string }>(token, APPROVAL_GRACE_S);
+      if (!p || p.typ !== 'appr' || p.perm !== perm || p.dev !== device.id) throw new Reject(['Persetujuan manajer tidak sah atau kedaluwarsa']);
       const s = await this.staff(tx, p.sub);
       if (!s || !can(s, perm) || !canBranch(s, branchId)) throw new Reject(['Penyetuju tidak berhak']);
       // Satu token = satu pesanan (boleh dikirim ulang untuk versi berikut pesanan yang sama).

@@ -44,7 +44,7 @@ export function toServerOrder(o: Order): Record<string, unknown> {
       discount: l.disc && l.disc.value > 0 ? { type: l.disc.type, value: l.disc.value } : undefined,
       promotionId: l.disc?.promotionId ?? undefined,
       sentToKitchenAt: iso(l.kAt),
-      voided: l.voided ? { reason: l.voided.reason, byId: l.voided.byId || undefined, at: iso(l.voided.at) } : undefined,
+      voided: l.voided ? { reason: l.voided.reason, byId: l.voided.byId || undefined, at: iso(l.voided.at), ...(l.voided.approval ? { approval: l.voided.approval } : {}) } : undefined,
     })),
     discount: o.discount && o.discount.value > 0 ? { type: o.discount.type, value: o.discount.value } : undefined,
     promotionId: o.discount?.promotionId ?? undefined,

@@ -161,7 +161,7 @@ export function SellView({ bill }: { bill?: string | undefined }) {
     else if (r.kind === 'remove') commit({ ...cur, lines: cur.lines.filter((l) => l.id !== r.id) });
     else if (r.kind === 'again') addLine(makeLine(p, selectionOf(p, line!.optionIds), { qty: 1, note: line!.note }, cur));
     else if (r.kind === 'void') {
-      const mark = (l: Line): Line => (l.id === r.id ? { ...l, voided: { reason: r.reason, byId: r.approval.staff.id, byName: r.approval.staff.name, at: Date.now() } } : l);
+      const mark = (l: Line): Line => (l.id === r.id ? { ...l, voided: { reason: r.reason, byId: r.approval.staff.id, byName: r.approval.staff.name, at: Date.now(), ...(r.approval.token ? { approval: r.approval.token } : {}) } } : l);
       let next: Order = { ...cur, lines: cur.lines.map(mark) };
       if (cur.status === 'OPEN' || cur.status === 'AWAITING_PAYMENT') {
         // simpan pembatalan saja; baris baru yang belum disimpan tetap di keranjang

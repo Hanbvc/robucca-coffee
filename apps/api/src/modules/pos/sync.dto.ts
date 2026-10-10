@@ -25,6 +25,12 @@ export class ItemVoidDto {
   @IsUUID()
   byId?: string;
 
+  /** Token POST /pos/approve (order.void.approve): wajib untuk item yang sudah dikirim ke dapur/bar. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  approval?: string;
+
   @IsDateString()
   at!: string;
 }
@@ -340,6 +346,10 @@ export class AuditDocDto {
 }
 
 export class SyncDto {
+  /** Token sesi (POST /pos/login) staf yang login online di perangkat ini: bukti pelaku untuk penyetuju. */
+  @IsOptional() @IsArray() @ArrayMaxSize(50) @IsString({ each: true }) @MaxLength(1000, { each: true })
+  staffSessions?: string[];
+
   @IsOptional() @IsArray() @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => ShiftDocDto)
   shifts?: ShiftDocDto[];
 

@@ -157,7 +157,7 @@ Aksi yang dicatat:
 Sebelumnya `GET /pos/master` mengirim hash bcrypt PIN **semua** staf ke perangkat agar login dan persetujuan bisa dilakukan offline. Masalahnya, PIN 4–6 digit mudah ditebak offline dari hash itu. Kasir bisa menebak PIN manajer lalu menyetujui void, refund, atau diskonnya sendiri.
 
 Sekarang:
-1. **Hash PIN tidak dikirim** untuk staf yang punya salah satu hak penyetuju: `*`, `order.void.approve`, `order.refund.approve`, `discount.approve` (`APPROVER_PERMS` di `pos.service.ts`). Di `/pos/master` mereka muncul dengan `pinHash: null, onlineOnly: true`.
+1. **Hash PIN tidak dikirim** untuk staf yang punya salah satu hak penyetuju: `*`, `order.void.approve`, `order.refund.approve`, `discount.approve` (`APPROVER_PERMS` di `pos/actors.ts`). Di `/pos/master` mereka muncul dengan `pinHash: null, onlineOnly: true`.
 2. **Manajer dan pemilik hanya bisa login di POS saat online**, lewat `POST /pos/login`. Saat offline, layar login menandai mereka "butuh koneksi" dan menjelaskan alasannya. Staf kasir dan dapur tetap bisa login offline.
 3. **Persetujuan manajer offline dihapus dari UI.** Tindakan yang butuh persetujuan (void, refund, diskon di atas batas, promo berpersetujuan) menampilkan "Butuh koneksi untuk persetujuan manajer" saat offline. Persetujuan selalu lewat `POST /pos/approve`: PIN diperiksa server, lalu server mengembalikan token bertanda tangan.
 4. **`POST /pos/sync` menolak persetujuan offline.** Dokumen yang hanya membawa ID penyetuju tanpa token (`approval.offline` / `discountApprovedById`) dan penyetujunya bukan kasir itu sendiri ditolak dengan pesan "Persetujuan manajer offline tidak diterima…". Lihat tes di `test/pos.test.mjs`.
@@ -165,18 +165,23 @@ Sekarang:
    - Token berlaku 5 menit, tetapi boleh terkirim hingga 24 jam kemudian (perangkat sempat offline setelah disetujui).
    - Token terikat ke perangkat dan hak yang disetujui, serta hanya untuk **satu pesanan** (dicatat sebagai `approval.token`).
    - Token membawa `jti` acak, sehingga dua persetujuan dalam detik yang sama tetap berbeda.
+   - Setiap token bertanda tangan punya jenis (`typ`): sesi staf `sess`, persetujuan `appr`, pelanggan PWA `cust`, akses pesanan `order`. Server memeriksa jenisnya, jadi token persetujuan (yang subjeknya manajer) tidak bisa dipakai sebagai sesi manajer.
+6. **Pelaku dokumen sinkron terikat ke login** (`pos/actors.ts`):
+   - Kasir pesanan, pembuka/penutup shift, dan pencatat kas yang punya hak menyetujui (manajer/pemilik) hanya diterima bila ia login online di perangkat itu. Buktinya token sesi `POST /pos/login`, yang dikirim POS di `staffSessions` (disimpan sampai 7 hari setelah sesi berakhir). Tanpa bukti, dokumen ditolak dengan pesan "… hanya diterima bila ia login online di perangkat ini".
+   - Kasir/dapur tetap boleh tanpa bukti karena memang bisa login offline. Konsekuensinya, perangkat yang sah tetap bisa mencatat transaksi atas nama kasir lain di cabangnya; ini batas login offline, bukan sesuatu yang bisa diperiksa server.
+   - Log dari perangkat dengan pelaku yang tidak terbukti disimpan dengan `actorId: null` dan `detail.claimedActorId`.
+7. **Pembatalan butuh persetujuan di server, seperti POS lama:** membatalkan tagihan (lunas atau belum) dan membatalkan item yang sudah dikirim ke dapur/bar wajib membawa token persetujuan `order.void.approve` (`voidApproval`, atau `items[].voided.approval`), kecuali kasir yang login online sendiri berhak menyetujui. Item yang belum dikirim cukup dihapus dari keranjang.
 
 ## Shift per terminal
 
 - `GET /pos/shift/open` (perangkat) mengembalikan shift `OPEN` terakhir untuk terminal ini beserta kas masuk/keluarnya, atau `{shift:null}`. POS memanggilnya setelah dipasang ulang dan sebelum membuka shift baru, lalu melanjutkan shift server itu. Toast: "Melanjutkan shift terbuka dari server".
 - `/pos/sync` menolak shift `OPEN` kedua untuk terminal yang sama: "Terminal N masih punya shift terbuka (dibuka X). Lanjutkan shift itu atau tutup dulu."
-- Batasan: tidak ada constraint unik di DB. Dua sinkron yang benar-benar bersamaan masih bisa lolos (lihat "Celah yang diketahui").
+- Database menjaganya juga: indeks unik parsial `Shift_one_open_per_device` (satu shift `OPEN` per perangkat, migrasi `20261010150000_pwa_otp_shift_guard`). Dua sinkron bersamaan dari perangkat yang sama tidak bisa sama-sama lolos; yang kalah ditolak.
 
 ## Celah yang diketahui
 
 - Seed ulang menimpa harga menu pusat dan daftar hak peran ke nilai bawaan.
-- Duplikasi shift `OPEN` dicegah di aplikasi, bukan dengan indeks unik parsial di DB.
-- `/pos/sync` masih memercayai `cashierId` dari perangkat. Perangkat yang sah bisa mengaku sebagai kasir lain di cabangnya. Persetujuan untuk diri sendiri lewat cara ini hanya mungkin bila kasir yang diaku memang berhak menyetujui.
-- Pembatalan item di keranjang (`line.void`, dicatat perangkat lewat log) belum diperiksa persetujuannya oleh server.
+- Indeks unik shift berlaku per perangkat. Terminal yang dipasang ulang (perangkat baru, nomor terminal sama) dijaga oleh pemeriksaan aplikasi saja.
+- Perangkat yang sah masih bisa mencatat transaksi atas nama **kasir** lain di cabangnya (lihat poin 6); tidak berlaku untuk manajer/pemilik.
 - Kantor hanya online. Di mode demo, halaman Kantor menampilkan penjelasan.
 - Refund dari Kantor hanya untuk pesanan di cabang perangkat yang dipakai (refund lewat sinkron perangkat).

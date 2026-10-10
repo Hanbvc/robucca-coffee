@@ -98,8 +98,9 @@ export class AuthService {
   }
 
   async session(token: string | undefined, device: DeviceCtx | null): Promise<StaffCtx> {
-    const p = token ? verify<{ sub: string; dev?: string }>(token) : null;
-    if (!p) throw new UnauthorizedException('Sesi berakhir, silakan masuk lagi');
+    // typ wajib 'sess': token lain bertanda tangan sama (persetujuan manajer, pelanggan, akses pesanan) bukan sesi staf.
+    const p = token ? verify<{ sub: string; dev?: string; typ?: string }>(token) : null;
+    if (!p || p.typ !== 'sess') throw new UnauthorizedException('Sesi berakhir, silakan masuk lagi');
     if (device && p.dev !== device.id) throw new UnauthorizedException('Sesi bukan untuk perangkat ini');
     const staff = await this.staffById(p.sub);
     if (!staff) throw new UnauthorizedException('Akun tidak aktif');

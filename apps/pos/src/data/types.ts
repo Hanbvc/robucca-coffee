@@ -164,6 +164,8 @@ export interface LineVoid {
   byId: string;
   byName: string;
   at: number;
+  /** token persetujuan server (item yang sudah dikirim ke dapur/bar) */
+  approval?: string;
 }
 
 export interface Line {

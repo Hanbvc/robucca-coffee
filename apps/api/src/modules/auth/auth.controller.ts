@@ -40,7 +40,7 @@ export class AuthController {
     }
     pinLimit.ok(key);
     await this.prisma.db.user.update({ where: { id: body.userId }, data: { lastLoginAt: new Date() } });
-    const session = sign({ sub: staff.id, dev: device.id }, SESSION_TTL_SECONDS);
+    const session = sign({ sub: staff.id, dev: device.id, typ: 'sess' }, SESSION_TTL_SECONDS);
     return { session, expiresIn: SESSION_TTL_SECONDS, staff: { id: staff.id, name: staff.name, role: staff.role, permissions: staff.permissions } };
   }
 
@@ -68,7 +68,7 @@ export class AuthController {
       if (!(p.includes('*') || p.includes(body.permission))) continue;
       if (await bcrypt.compare(body.pin, c.pinHash!)) {
         pinLimit.ok(key);
-        const approval = sign({ sub: c.id, perm: body.permission, dev: device.id, req: staff.id, jti: randomUUID() }, APPROVAL_TTL_SECONDS);
+        const approval = sign({ sub: c.id, perm: body.permission, dev: device.id, req: staff.id, jti: randomUUID(), typ: 'appr' }, APPROVAL_TTL_SECONDS);
         return { approval, approver: { id: c.id, name: c.name } };
       }
     }
@@ -92,7 +92,7 @@ export class AuthController {
       throw new UnauthorizedException('Email atau password salah');
     }
     pinLimit.ok(key);
-    const session = sign({ sub: staff.id }, SESSION_TTL_SECONDS);
+    const session = sign({ sub: staff.id, typ: 'sess' }, SESSION_TTL_SECONDS);
     return { session, expiresIn: SESSION_TTL_SECONDS, staff };
   }
 

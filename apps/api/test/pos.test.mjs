@@ -232,6 +232,76 @@ test('refund: kasir butuh persetujuan, hanya sekali', { skip }, async () => {
   assert.equal(again.status, 409);
 });
 
+test('jenis token: token persetujuan / token lain tidak bisa dipakai sebagai sesi staf', { skip }, async () => {
+  const appr = await call('POST', '/pos/approve', { pin: '2222', permission: 'order.void.approve' }, ses());
+  assert.equal(appr.status, 200);
+  // Token persetujuan (sub = manajer, dev = perangkat ini) bukan sesi: tidak memberi akses manajer.
+  assert.equal((await call('GET', '/auth/me', null, { ...dev(), 'x-session': appr.body.approval })).status, 401);
+  assert.equal((await call('GET', '/office/me', null, { ...dev(), 'x-session': appr.body.approval })).status, 401);
+  // Sesi kasir bukan token persetujuan.
+  const o = order({ status: 'OPEN', paidAt: undefined, payments: [] });
+  await call('POST', '/pos/sync', { orders: [o] }, dev());
+  const r = await call('POST', '/pos/sync', { orders: [{ ...o, version: 2, status: 'VOIDED', voidReason: 'Tes', voidApproval: cashierSession }] }, dev());
+  assert.equal(r.body.orders[0].status, 'rejected');
+});
+
+test('pelaku dokumen: manajer sebagai kasir hanya dengan bukti login online di perangkat ini', { skip }, async () => {
+  // Tanpa bukti sesi: kasir tidak bisa mengisi ID manajer (lalu "menyetujui sendiri" void/diskon).
+  const asDewi = order({ cashierId: ids.dewi });
+  const r = await call('POST', '/pos/sync', { orders: [asDewi] }, dev());
+  assert.equal(r.body.orders[0].status, 'rejected');
+  assert.match(r.body.orders[0].errors[0], /login online/);
+  const voidSelf = await call('POST', '/pos/sync', { orders: [{ ...order({ cashierId: ids.dewi }), status: 'VOIDED', voidReason: 'Iseng', paidAt: undefined }] }, dev());
+  assert.equal(voidSelf.body.orders[0].status, 'rejected');
+  // Kas & shift atas nama manajer juga ditolak tanpa bukti.
+  const cash = await call('POST', '/pos/sync', { cashMovements: [{ id: randomUUID(), shiftId: ids.shift, type: 'CASH_OUT', amount: 5000, reason: 'Tes', createdById: ids.dewi, createdAt: new Date().toISOString() }] }, dev());
+  assert.equal(cash.body.cashMovements[0].status, 'rejected');
+  // Log dengan pelaku manajer tanpa bukti: pelaku dikosongkan, klaim disimpan.
+  await call('POST', '/pos/sync', { audit: [{ action: 'tes.klaim', actorId: ids.dewi, at: new Date().toISOString(), detail: { run } }] }, dev());
+  const log = await db.auditLog.findFirst({ where: { action: 'pos.tes.klaim' }, orderBy: { createdAt: 'desc' } });
+  assert.equal(log.actorId, null);
+  assert.equal(log.detail.claimedActorId, ids.dewi);
+  // Dengan sesi Dewi dari /pos/login di perangkat ini: diterima.
+  const login = await call('POST', '/pos/login', { userId: ids.dewi, pin: '2222' }, dev());
+  assert.equal(login.status, 200);
+  const ok = await call('POST', '/pos/sync', { orders: [order({ cashierId: ids.dewi })], staffSessions: [login.body.session] }, dev());
+  assert.equal(ok.body.orders[0].status, 'saved', JSON.stringify(ok.body));
+  // Sesi kasir lain / sesi perangkat lain tidak membuktikan Dewi.
+  const wrong = await call('POST', '/pos/sync', { orders: [order({ cashierId: ids.dewi })], staffSessions: [cashierSession] }, dev());
+  assert.equal(wrong.body.orders[0].status, 'rejected');
+});
+
+test('void tagihan belum lunas & item yang sudah dikirim ke dapur butuh persetujuan manajer', { skip }, async () => {
+  const latte = product('kopi-susu-essentials');
+  const sentAt = new Date().toISOString();
+  const line = (over = {}) => ({ id: randomUUID(), productId: latte.id, quantity: 1, unitPrice: latte.price, optionIds: [optionId(latte, 'Normal'), optionId(latte, 'Normal Ice')], ...over });
+  const a = line({ sentToKitchenAt: sentAt });
+  const b = line({ sentToKitchenAt: sentAt });
+  const o = order({ status: 'OPEN', paidAt: undefined, payments: [], items: [a, b] });
+  assert.equal((await call('POST', '/pos/sync', { orders: [o] }, dev())).body.orders[0].status, 'saved');
+  // Item terkirim dibatalkan tanpa persetujuan → ditolak.
+  const voidedA = { ...a, voided: { reason: 'Pelanggan batal', at: new Date().toISOString() } };
+  const no = await call('POST', '/pos/sync', { orders: [{ ...o, version: 2, items: [voidedA, b] }] }, dev());
+  assert.equal(no.body.orders[0].status, 'rejected');
+  assert.match(no.body.orders[0].errors[0], /dapur butuh persetujuan/);
+  // Dengan token persetujuan → diterima, penyetuju tercatat.
+  const appr = await call('POST', '/pos/approve', { pin: '2222', permission: 'order.void.approve' }, ses());
+  const yes = await call('POST', '/pos/sync', { orders: [{ ...o, version: 2, items: [{ ...voidedA, voided: { ...voidedA.voided, byId: ids.dewi, approval: appr.body.approval } }, b] }] }, dev());
+  assert.equal(yes.body.orders[0].status, 'saved', JSON.stringify(yes.body));
+  const item = await db.orderItem.findUnique({ where: { id: a.id } });
+  assert.ok(item.voidedAt);
+  assert.equal(item.voidedById, ids.dewi);
+  // Versi berikut tanpa token: item yang sudah batal tidak dicek ulang.
+  const v3 = await call('POST', '/pos/sync', { orders: [{ ...o, version: 3, items: [{ ...voidedA }, b], note: 'tambah catatan' }] }, dev());
+  assert.equal(v3.body.orders[0].status, 'saved', JSON.stringify(v3.body));
+  // Membatalkan seluruh tagihan (belum lunas) tanpa persetujuan → ditolak; dengan token → diterima.
+  const noVoid = await call('POST', '/pos/sync', { orders: [{ ...o, version: 4, items: [voidedA, b], status: 'VOIDED', voidReason: 'Pelanggan pergi' }] }, dev());
+  assert.equal(noVoid.body.orders[0].status, 'rejected');
+  const appr2 = await call('POST', '/pos/approve', { pin: '2222', permission: 'order.void.approve' }, ses());
+  const okVoid = await call('POST', '/pos/sync', { orders: [{ ...o, version: 4, items: [voidedA, b], status: 'VOIDED', voidReason: 'Pelanggan pergi', voidApproval: appr2.body.approval }] }, dev());
+  assert.equal(okVoid.body.orders[0].status, 'saved', JSON.stringify(okVoid.body));
+});
+
 test('kas keluar & tutup shift: kas seharusnya dihitung server', { skip }, async () => {
   await call('POST', '/pos/sync', { cashMovements: [{ id: randomUUID(), shiftId: ids.shift, type: 'CASH_OUT', amount: 10000, reason: 'Beli es batu', createdById: ids.sari, createdAt: new Date().toISOString() }] }, dev());
   const r = await call('POST', '/pos/sync', { shifts: [{ id: ids.shift, status: 'CLOSED', openedAt: new Date().toISOString(), openingCash: 200000, openedById: ids.sari, closedAt: new Date().toISOString(), closedById: ids.sari, countedCash: 238000, countedDenominations: { 100000: 2, 20000: 1, 10000: 1, 5000: 1, 2000: 1, 1000: 1 } }] }, dev());

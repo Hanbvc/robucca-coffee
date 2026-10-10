@@ -40,6 +40,9 @@ interface ServerOpenShift {
 
 type AnyDoc = { id: string; version: number; updatedAt: number };
 
+/** Sama dengan SESSION_PROOF_GRACE_S di API (apps/api/src/modules/pos/actors.ts). */
+const SESSION_PROOF_GRACE_MS = 7 * 24 * 3600e3;
+
 interface SyncResponse {
   shifts: { id: string; status: string; errors?: string[] }[];
   cashMovements: { id: string; status: string; errors?: string[] }[];
@@ -59,6 +62,12 @@ export class Backend {
   private fails = new Map<string, { n: number; until: number }>();
   /** PIN staf yang sedang login — hanya di memori, untuk membuat sesi server saat koneksi kembali. */
   private loginPin: { staffId: string; pin: string } | null = null;
+  /**
+   * Sesi server dari login online di perangkat ini, dikirim bersama sinkron (staffSessions) sebagai bukti pelaku:
+   * server hanya menerima dokumen atas nama manajer/pemilik bila ia benar-benar login online di sini.
+   * Disimpan sampai 7 hari setelah kedaluwarsa (dokumen offline bisa terkirim terlambat).
+   */
+  private staffSessions: { staffId: string; token: string; exp: number }[] = [];
   private syncStarted = false;
   private inSync = false;
   private again = false;
@@ -78,6 +87,7 @@ export class Backend {
       }
       b.syncErrors = await db.getMeta<SyncErrorEntry[]>('syncErrors', []);
       b.lastSync = await db.getMeta('lastSync', 0);
+      b.staffSessions = await db.getMeta<{ staffId: string; token: string; exp: number }[]>('staffSessions', []);
     }
     return b;
   }
@@ -123,6 +133,8 @@ export class Backend {
     await db.clear([...TX_COLLS, 'outbox']);
     await db.setMeta('masterVersion', null);
     await db.setMeta('feedCursor', null);
+    this.staffSessions = [];
+    await db.setMeta('staffSessions', []);
     this.api = new ApiClient({ url: api.url, token: res.token });
     // Perangkat baru dianggap siap setelah master tersimpan (layar tidak berpindah di tengah jalan).
     const device: DeviceInfo = {
@@ -319,7 +331,21 @@ export class Backend {
     const r = await this.api.post<{ session: string; expiresIn: number }>('/pos/login', { userId: this.loginPin.staffId, pin: this.loginPin.pin });
     this.api.session = r.session;
     ss.set('pos:session', { s: r.session, staffId: this.loginPin.staffId, exp: Date.now() + r.expiresIn * 1000 - 60e3 });
+    await this.rememberSession(this.loginPin.staffId, r.session, Date.now() + r.expiresIn * 1000);
     return true;
+  }
+
+  /** Simpan bukti login online (satu per staf, yang terbaru); buang yang lewat masa tenggang. */
+  private async rememberSession(staffId: string, token: string, exp: number): Promise<void> {
+    const keep = Date.now() - SESSION_PROOF_GRACE_MS;
+    this.staffSessions = [{ staffId, token, exp }, ...this.staffSessions.filter((x) => x.staffId !== staffId && x.exp > keep)].slice(0, 30);
+    await db.setMeta('staffSessions', this.staffSessions);
+  }
+
+  /** Token sesi yang masih bisa dipakai server sebagai bukti pelaku. */
+  private sessionProofs(): string[] {
+    const keep = Date.now() - SESSION_PROOF_GRACE_MS;
+    return this.staffSessions.filter((x) => x.exp > keep).map((x) => x.token);
   }
 
   private restoreSession(): void {
@@ -572,7 +598,7 @@ export class Backend {
   }
 
   private buildBody(entries: OutboxEntry[], docs: Map<string, AnyDoc>) {
-    const body: Record<string, unknown[]> = { shifts: [], cashMovements: [], orders: [], kitchen: [], audit: [] };
+    const body: Record<string, unknown[]> = { shifts: [], cashMovements: [], orders: [], kitchen: [], audit: [], staffSessions: this.sessionProofs() };
     for (const e of entries) {
       const d = docs.get(e.k);
       if (!d) continue;
