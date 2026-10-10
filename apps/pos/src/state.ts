@@ -6,6 +6,7 @@ import { can as canPerm, type Master, type Perm } from './data/master';
 import type { MStaff, Shift } from './data/types';
 import { bus, useBusTick } from './lib/bus';
 import { ss } from './lib/store';
+import { closeAllModals } from './ui/overlay';
 
 export const S: { be: Backend; user: MStaff | null; shift: Shift | null } = {
   be: null as unknown as Backend,
@@ -33,6 +34,14 @@ export function restoreUser(): void {
   const x = ss.get<{ id: string; exp: number } | null>(SESSION_KEY, null);
   const s = x && x.exp > Date.now() ? S.be.master?.person(x.id) : undefined;
   if (s) S.user = s;
+}
+/** Keluar (atau kunci layar saja: sesi server tetap). */
+export function logout(lockOnly = false): void {
+  if (!lockOnly) S.be.logout();
+  S.shift = null;
+  closeAllModals();
+  setUser(null);
+  nav('masuk');
 }
 export function setShift(sh: Shift | null): void {
   S.shift = sh;
