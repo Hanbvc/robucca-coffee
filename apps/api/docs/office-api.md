@@ -171,6 +171,7 @@ Sekarang:
    - Kasir/dapur tetap boleh tanpa bukti karena memang bisa login offline. Konsekuensinya, perangkat yang sah tetap bisa mencatat transaksi atas nama kasir lain di cabangnya; ini batas login offline, bukan sesuatu yang bisa diperiksa server.
    - Log dari perangkat dengan pelaku yang tidak terbukti disimpan dengan `actorId: null` dan `detail.claimedActorId`.
 7. **Pembatalan butuh persetujuan di server, seperti POS lama:** membatalkan tagihan (lunas atau belum) dan membatalkan item yang sudah dikirim ke dapur/bar wajib membawa token persetujuan `order.void.approve` (`voidApproval`, atau `items[].voided.approval`), kecuali kasir yang login online sendiri berhak menyetujui. Item yang belum dikirim cukup dihapus dari keranjang.
+8. **Refund:** staf yang memproses harus berhak berjualan (`order.sell`). Token persetujuan hanya sah di perangkat tempat ia diminta dan untuk staf yang memintanya; penyetuju harus berhak atas cabang pesanan.
 
 ## Shift per terminal
 

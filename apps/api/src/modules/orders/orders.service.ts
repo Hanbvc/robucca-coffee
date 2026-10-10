@@ -25,19 +25,23 @@ export class OrdersService {
 
   /**
    * Refund penuh, sekali per pesanan (dijaga juga oleh constraint unik di database).
-   * Online saja: butuh hak refund pada staf yang login, atau token persetujuan manajer.
+   * Online saja: staf yang memproses harus bisa berjualan (order.sell) dan punya hak refund sendiri, atau membawa token
+   * persetujuan manajer yang diminta olehnya sendiri di perangkat ini. Penyetuju harus berhak atas cabang pesanan.
    */
   async refund(id: string, reason: string, approval: string | undefined, staff: StaffCtx, device: DeviceCtx | undefined) {
-    let approverId: string | null = can(staff, 'order.refund.approve') ? staff.id : null;
-    if (!approverId && approval) {
-      const p = verify<{ sub: string; perm: string; dev: string; typ?: string }>(approval);
-      if (!p || p.typ !== 'appr' || p.perm !== 'order.refund.approve' || (device && p.dev !== device.id)) throw new ForbiddenException('Persetujuan manajer tidak sah atau kedaluwarsa');
-      // Penyetuju diperiksa ulang: masih aktif, masih berhak, dan cabangnya sama.
+    if (!can(staff, 'order.sell') && !can(staff, 'order.refund.approve')) throw new ForbiddenException('Anda tidak berhak memproses refund');
+    let approver: StaffCtx | null = can(staff, 'order.refund.approve') ? staff : null;
+    if (!approver && approval) {
+      const p = verify<{ sub: string; perm: string; dev: string; req?: string; typ?: string }>(approval);
+      const valid = !!p && p.typ === 'appr' && p.perm === 'order.refund.approve' && !!device && p.dev === device.id && p.req === staff.id;
+      if (!valid) throw new ForbiddenException('Persetujuan manajer tidak sah atau kedaluwarsa');
+      // Penyetuju diperiksa ulang: masih aktif dan masih berhak (cabangnya diperiksa setelah pesanan dibaca).
       const a = await this.auth.staffById(p.sub);
       if (!a || !can(a, 'order.refund.approve')) throw new ForbiddenException('Penyetuju tidak berhak');
-      approverId = p.sub;
+      approver = a;
     }
-    if (!approverId) throw new ForbiddenException('Refund butuh persetujuan manajer (PIN)');
+    if (!approver) throw new ForbiddenException('Refund butuh persetujuan manajer (PIN)');
+    const approverId = approver.id;
 
     const result = await this.prisma.db.$transaction(async (tx) => {
       const o = await tx.order.findUnique({
@@ -46,11 +50,12 @@ export class OrdersService {
       });
       if (!o || !canBranch(staff, o.branchId)) throw new NotFoundException('Pesanan tidak ditemukan');
       if (device?.branchId && device.branchId !== o.branchId) throw new BadRequestException('Refund dilakukan di cabang pesanan');
+      if (!canBranch(approver!, o.branchId)) throw new ForbiddenException('Penyetuju tidak berhak atas cabang pesanan ini');
       if (o.status === 'REFUNDED') throw new ConflictException('Pesanan ini sudah di-refund');
       if (o.status !== 'PAID') throw new BadRequestException('Hanya pesanan lunas yang bisa di-refund');
       const shift = device ? await tx.shift.findFirst({ where: { branchId: o.branchId, deviceId: device.id, status: 'OPEN' }, select: { id: true } }) : null;
       const refund = await tx.refund.create({
-        data: { branchId: o.branchId, orderId: o.id, shiftId: shift?.id ?? null, amount: o.total, reason: reason.trim(), approvedById: approverId!, processedById: staff.id, createdAt: new Date() },
+        data: { branchId: o.branchId, orderId: o.id, shiftId: shift?.id ?? null, amount: o.total, reason: reason.trim(), approvedById: approverId, processedById: staff.id, createdAt: new Date() },
       });
       await tx.order.update({ where: { id: o.id }, data: { status: 'REFUNDED', version: { increment: 1 } } });
       await this.stock.applyOrder(tx, {

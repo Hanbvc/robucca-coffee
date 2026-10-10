@@ -226,6 +226,11 @@ test('refund: kasir butuh persetujuan, hanya sekali', { skip }, async () => {
   await call('POST', '/pos/sync', { orders: [o] }, dev());
   assert.equal((await call('POST', `/orders/${o.id}/refund`, { reason: 'Pelanggan komplain' }, ses())).status, 403);
   const appr = await call('POST', '/pos/approve', { pin: '2222', permission: 'order.refund.approve' }, ses());
+  // Token persetujuan terikat pada staf yang memintanya; staf dapur tidak boleh memproses refund sama sekali.
+  const dapur = master.staff.find((s) => s.name === 'Dapur IJN');
+  const kds = (await call('POST', '/pos/login', { userId: dapur.id, pin: '4444' }, dev())).body.session;
+  const byKitchen = await call('POST', `/orders/${o.id}/refund`, { reason: 'Coba', approval: appr.body.approval }, { ...dev(), 'x-session': kds });
+  assert.equal(byKitchen.status, 403);
   const r = await call('POST', `/orders/${o.id}/refund`, { reason: 'Pelanggan komplain', approval: appr.body.approval }, ses());
   assert.equal(r.status, 201, JSON.stringify(r.body));
   const again = await call('POST', `/orders/${o.id}/refund`, { reason: 'Lagi', approval: appr.body.approval }, ses());
