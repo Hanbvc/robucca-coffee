@@ -192,7 +192,7 @@ export class OrderDocDto {
   @MaxLength(100)
   discountNote?: string;
 
-  /** Token dari POST /pos/approve (online) — atau discountApprovedById saja bila disetujui offline. */
+  /** Token dari POST /pos/approve (online). Persetujuan offline (hanya discountApprovedById) ditolak server. */
   @IsOptional()
   @IsString()
   @MaxLength(1000)
