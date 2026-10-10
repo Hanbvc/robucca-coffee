@@ -114,13 +114,16 @@ export class Backend {
     await db.setMeta('masterVersion', null);
     await db.setMeta('feedCursor', null);
     this.api = new ApiClient({ url: api.url, token: res.token });
-    this.device = {
+    // Perangkat baru dianggap siap setelah master tersimpan (layar tidak berpindah di tengah jalan).
+    const device: DeviceInfo = {
       mode: 'server', id: res.device.id, name: res.device.name, branchId: null, branchCode: res.device.branch?.code ?? null,
       branchName: res.device.branch?.name ?? null, terminalNo: res.device.terminalNo || 1, serverUrl: api.url, token: res.token, pairedAt: Date.now(),
     };
-    await this.pullMaster(true);
-    this.device.branchId = this.master?.branch?.id ?? null;
-    await db.setMeta('device', this.device);
+    await this.pullMaster(true, false);
+    device.branchId = (await db.getMeta<MasterSnapshot | null>('master', null))?.branch?.id ?? null;
+    await db.setMeta('device', device);
+    this.device = device;
+    await this.loadMaster();
     this.syncErrors = [];
     await db.setMeta('syncErrors', []);
   }
@@ -132,29 +135,39 @@ export class Backend {
     const raw = demoMaster(branchCode);
     await db.clear([...TX_COLLS, 'outbox']);
     await db.setMeta('master', raw);
-    this.device = {
+    const device: DeviceInfo = {
       mode: 'demo', id: uuidv7(), name: 'Perangkat demo', branchId: raw.branch?.id ?? null, branchCode: raw.branch?.code ?? null,
       branchName: raw.branch?.name ?? null, terminalNo: 1, pairedAt: Date.now(),
     };
-    await db.setMeta('device', this.device);
-    await this.loadMaster();
-    if (history && this.master) {
+    if (history) {
       onProgress('Membuat riwayat transaksi contoh…');
-      const h = generateHistory(this.master, this.device);
+      const h = generateHistory(new Master(raw), device);
       await db.put('shifts', h.shifts);
       await db.put('cashMoves', h.cashMoves);
       await db.put('orders', h.orders);
       await db.put('kitchen', h.kitchen);
     }
+    await db.setMeta('device', device);
+    this.device = device;
+    await this.loadMaster();
   }
 
   /** Mode demo: perangkat ini berpura-pura menjadi kasir cabang lain. */
   async switchBranch(branchCode: string): Promise<void> {
-    const { demoMaster } = await import('./demo');
+    const { demoMaster, generateHistory } = await import('./demo');
     const raw = demoMaster(branchCode);
     await db.setMeta('master', raw);
-    this.device = { ...this.device!, branchId: raw.branch?.id ?? null, branchCode: raw.branch?.code ?? null, branchName: raw.branch?.name ?? null };
-    await db.setMeta('device', this.device);
+    const device: DeviceInfo = { ...this.device!, branchId: raw.branch?.id ?? null, branchCode: raw.branch?.code ?? null, branchName: raw.branch?.name ?? null };
+    // Cabang yang belum pernah dipakai di perangkat ini: buat riwayat contohnya.
+    if (!(await db.all<Order>('orders')).some((o) => o.branchId === device.branchId)) {
+      const h = generateHistory(new Master(raw), device);
+      await db.put('shifts', h.shifts);
+      await db.put('cashMoves', h.cashMoves);
+      await db.put('orders', h.orders);
+      await db.put('kitchen', h.kitchen);
+    }
+    await db.setMeta('device', device);
+    this.device = device;
     await this.loadMaster();
   }
 
@@ -166,14 +179,14 @@ export class Backend {
   /* =========================================================
      Data master
      ========================================================= */
-  async pullMaster(force = false): Promise<boolean> {
+  async pullMaster(force = false, load = true): Promise<boolean> {
     if (!this.api) return false;
     const ver = force ? null : await db.getMeta<string | null>('masterVersion', null);
     const res = await this.api.get<{ notModified?: boolean; version: string; master: MasterSnapshot }>('/pos/master', { etag: ver });
     if (res.notModified) return false;
     await db.setMeta('master', res.master);
     await db.setMeta('masterVersion', res.version);
-    await this.loadMaster();
+    if (load) await this.loadMaster();
     return true;
   }
 

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { defaultApiUrl, isOffline } from '../lib/api';
 import { Icon } from '../lib/icons';
-import { S } from '../state';
+import { S, setUser } from '../state';
 import { toast } from '../ui/overlay';
 import { DEMO_BRANCHES } from '../data/demo-info';
 
@@ -36,12 +36,17 @@ export function SetupView() {
     };
   }, []);
 
+  /** Perangkat siap → layar login (tanpa muat ulang halaman). */
+  const done = () => {
+    history.replaceState(null, '', '#/masuk');
+    setUser(null);
+  };
+
   const startDemo = async () => {
     setWorking(true);
     try {
       await S.be.setupDemo({ branchCode: branch, onProgress: setMsg });
-      location.hash = '#/masuk';
-      location.reload();
+      done();
     } catch (e) {
       console.error(e);
       setMsg(`Gagal menyiapkan demo: ${(e as Error).message || e}`);
@@ -59,8 +64,8 @@ export function SetupView() {
     try {
       await S.be.pair({ url: u, code: c, name: name.trim() || 'Kasir' });
       toast('Perangkat terpasang');
-      location.hash = '#/masuk';
-      location.reload();
+      S.be.startSync();
+      done();
     } catch (x) {
       setErr(isOffline(x) ? `Tidak bisa menghubungi ${u}. Periksa alamat & koneksi.` : (x as Error).message);
       setWorking(false);
