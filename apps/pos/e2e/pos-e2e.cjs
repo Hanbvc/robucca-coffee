@@ -1,6 +1,6 @@
 /* E2E POS React terhadap API (mode server) + mode demo. Bukan bagian `pnpm test`; jalankan manual:
      1. Postgres + DB khusus (bukan robucca_dev/robucca_test): migrate deploy, SEED_DEMO=1 seed
-     2. API: PORT=3310 DATABASE_URL=… node apps/api/dist/main.js  (perintahnya di E2E_API_CMD, PID di E2E_API_PID)
+     2. API: PORT=3310 DATABASE_URL=… node apps/api/dist/main.js  (perintahnya di E2E_API_CMD, PID di E2E_API_PID; port lain: E2E_API_PORT/E2E_POS_PORT)
      3. POS: pnpm --filter @robucca/pos build && API_PROXY_TARGET=http://localhost:3310 npx vite preview --port 4310
      4. E2E_DB=postgresql://… E2E_API_CMD=/path/start-api.sh node apps/pos/e2e/pos-e2e.cjs
    Butuh paket playwright (PLAYWRIGHT_PATH) + Chromium (PLAYWRIGHT_BROWSERS_PATH). Tangkapan layar → apps/pos/docs/screenshots. */
@@ -11,7 +11,8 @@ const path = require('node:path');
 const WT = path.resolve(__dirname, '../../..');
 const SP = process.env.E2E_TMP || require('node:os').tmpdir();
 const SHOTS = process.env.SHOTS || `${WT}/apps/pos/docs/screenshots`;
-const BASE = 'http://localhost:4310/?nosw';
+const API_PORT = process.env.E2E_API_PORT || '3310';
+const BASE = `http://localhost:${process.env.E2E_POS_PORT || '4310'}/?nosw`;
 const DB = process.env.E2E_DB || 'postgresql://postgres@localhost:54329/robucca_posapp?host=/tmp';
 fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -26,7 +27,7 @@ function stopApi() {
   const pid = apiPid();
   try { process.kill(pid, 'SIGTERM'); } catch {}
   for (let i = 0; i < 40; i++) {
-    try { execSync('curl -sf localhost:3310/health', { stdio: 'ignore' }); } catch { return; }
+    try { execSync(`curl -sf localhost:${API_PORT}/health`, { stdio: 'ignore' }); } catch { return; }
     execSync('sleep 0.25');
   }
   throw new Error('API tidak berhenti');
@@ -37,7 +38,7 @@ async function startApi() {
   p.unref();
   fs.writeFileSync(process.env.E2E_API_PID || `${SP}/api.pid`, String(p.pid));
   for (let i = 0; i < 60; i++) {
-    try { execSync('curl -sf localhost:3310/health', { stdio: 'ignore' }); return; } catch {}
+    try { execSync(`curl -sf localhost:${API_PORT}/health`, { stdio: 'ignore' }); return; } catch {}
     await wait(500);
   }
   throw new Error('API tidak menyala');
@@ -191,7 +192,7 @@ async function payCash(page, shotName) {
        values ('${pwaId}','${bid}','${pwaNo}','A01','PWA','CLICK_COLLECT','OPEN','Budi PWA','081234567890',(now() at time zone 'Asia/Jakarta')::date, now()+interval '20 min',24000,2182,24000,1000,true,now(),now())`);
   sql(`insert into "OrderItem" (id,"orderId","productId","productName",quantity,"unitPrice","lineTotal",station,"sentToKitchenAt")
        values (gen_random_uuid(),'${pwaId}','${pid}','Kopi Susu Essentials',1,24000,24000,'BAR',now())`);
-  execSync(`curl -s -o /dev/null localhost:3310/health`);
+  execSync(`curl -s -o /dev/null localhost:${API_PORT}/health`);
   log('pesanan PWA dibuat', pwaNo);
   await page.goto(BASE.replace('?nosw', '?nosw#/tagihan'));
   let seen = false;
