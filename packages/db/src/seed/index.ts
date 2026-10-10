@@ -80,6 +80,11 @@ const PAYMENT_OPTIONS = [
   { code: 'dana', name: 'DANA', method: PaymentMethod.E_WALLET, provider: 'dana', ref: false },
   { code: 'shopeepay', name: 'ShopeePay', method: PaymentMethod.E_WALLET, provider: 'shopeepay', ref: false },
   { code: 'transfer', name: 'Transfer Bank', method: PaymentMethod.BANK_TRANSFER, provider: null, ref: true },
+  // Pesanan ojol dibayar lewat aplikasinya (dana masuk lewat transfer platform). Kode = kode kanal;
+  // kasir hanya menampilkan metode ini untuk kanal ojol yang sama (POS lama: "dibayar platform").
+  { code: 'gofood', name: 'GoFood (dibayar platform)', method: PaymentMethod.BANK_TRANSFER, provider: 'gofood', ref: false },
+  { code: 'grabfood', name: 'GrabFood (dibayar platform)', method: PaymentMethod.BANK_TRANSFER, provider: 'grabfood', ref: false },
+  { code: 'shopeefood', name: 'ShopeeFood (dibayar platform)', method: PaymentMethod.BANK_TRANSFER, provider: 'shopeefood', ref: false },
 ];
 
 /** Kelompok kategori; data lama menyimpan pastry & dessert di kelompok "snack". */

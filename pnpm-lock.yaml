@@ -66,6 +66,12 @@ importers:
 
   apps/pos:
     dependencies:
+      '@robucca/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      bcryptjs:
+        specifier: 3.0.3
+        version: 3.0.3
       localforage:
         specifier: 1.10.0
         version: 1.10.0

@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@robucca/core": "workspace:*",
+    "bcryptjs": "3.0.3",
     "localforage": "1.10.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
