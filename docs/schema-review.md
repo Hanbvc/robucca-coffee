@@ -1,6 +1,20 @@
 # Review skema database — Fase 1 PRD
 
-Draft skema ada di [`packages/db/prisma/schema.prisma`](../packages/db/prisma/schema.prisma) (Prisma 7, PostgreSQL). **Belum ada migrasi dan belum ada CRUD.** Keduanya menunggu skema ini disetujui.
+Skema ada di [`packages/db/prisma/schema.prisma`](../packages/db/prisma/schema.prisma) (Prisma 7, PostgreSQL).
+
+**Status (10 Okt 2026): disetujui sementara.** Hans meminta dijalankan dengan data seadanya dan direvisi nanti. Migrasi pertama (`prisma/migrations/…_init`) dan seed dari data lama sudah dibuat. Pertanyaan di bawah memakai jawaban default berikut sampai Hans memutuskan lain:
+
+| Pertanyaan | Default yang dipakai |
+| --- | --- |
+| Peran Kitchen | Ditambahkan |
+| Refund | Penuh, satu kali per pesanan |
+| BoM ukuran | Delta per opsi |
+| PIN kasir | bcrypt; batas percobaan login dibuat bersama modul auth |
+| Nama kolom | camelCase bawaan Prisma |
+| Delivery & ojol | Ada di skema; API kurir/ojol belum, pesanan ojol diinput kasir |
+| Reservasi | Tanpa kuota meja |
+
+Mengubah skema setelah ini dilakukan lewat migrasi baru (`pnpm db:migrate`), bukan mengedit migrasi pertama.
 
 PRD lengkap: `prd-robbucca-v1.md` di folder project (`/mnt/project-files/prd/`).
 
@@ -115,8 +129,8 @@ Atas permintaan Hans (10 Okt 2026), fitur sistem lama yang tidak disebut PRD tet
 Fitur yang tidak butuh tabel baru: stok menu jadi (pastry) dicatat sebagai bahan `PIECE` dengan resep 1 pcs; tandai habis lewat `ProductBranch.isAvailable`; transfer antarcabang, opname, barang rusak lewat `StockMovement`; tiket dapur, layar antrean, dan menu pelanggan memakai data pesanan & menu yang sudah ada.
 
 ## Belum masuk skema (sengaja)
-- **CHECK constraint** "Recipe harus milik tepat satu: produk atau opsi" belum bisa ditulis di Prisma. Akan ditulis di migrasi pertama.
-- API belum tersambung ke `@robucca/db`. Itu dikerjakan bersama CRUD setelah skema disetujui.
+- **CHECK constraint** "Recipe harus milik tepat satu: produk atau opsi" dan "pengaturan hanya satu baris" ditulis manual di migrasi pertama (Prisma belum bisa menuliskannya), sudah diuji.
+- **Bahan baku & resep (BoM)** belum ada di seed karena datanya masih disiapkan.
 
 ## Pertanyaan untuk disetujui
 

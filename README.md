@@ -12,18 +12,28 @@ Repo ini sedang dipindah ke monorepo sesuai PRD *Robbucca Unified POS & PWA Syst
 
 | Folder | Isi | Status |
 | --- | --- | --- |
-| `apps/api` | Backend NestJS (TypeScript) | Kerangka + `GET /health` |
+| `apps/api` | Backend NestJS (TypeScript) | `GET /health`, `GET /branches`, `GET /branches/:kode/menu` |
 | `apps/pos` | Kasir React + Vite + Tailwind, siap Electron, offline-first | Kerangka |
 | `apps/pwa` | Aplikasi pelanggan Next.js (Click & Collect) | Kerangka |
-| `packages/db` | Prisma + PostgreSQL, skema bersama | **Draft skema, menunggu review** ([docs/schema-review.md](docs/schema-review.md)) |
+| `packages/db` | Prisma + PostgreSQL, skema bersama, migrasi, seed | Disetujui sementara; seed dari data lama ([docs/schema-review.md](docs/schema-review.md)) |
 | `pos/`, `server/`, `index.html`, `js/`, `menu/` | POS dan PWA lama | Acuan, tidak diubah |
 
 ```bash
 corepack enable && pnpm install
 pnpm typecheck && pnpm build   # semua app
-pnpm db:validate               # cek skema Prisma
 npm test                       # tes POS lama
+
+# Database (PostgreSQL 16+). Isi DATABASE_URL, contoh di packages/db/.env.example
+export DATABASE_URL=postgresql://robucca:password@localhost:5432/robucca
+pnpm db:deploy                 # jalankan migrasi
+pnpm db:seed                   # isi menu, cabang IJN, kanal, metode bayar dari data lama
+SEED_DEMO=1 pnpm db:seed       # + 3 cabang contoh & staf contoh (PIN 1111/2222/3333/4444), khusus dev
+SEED_OWNER_PIN=123456 pnpm db:seed   # + akun pemilik (Super Admin)
+
+pnpm --filter @robucca/api dev # API di http://localhost:3000 (coba /branches/IJN/menu)
 ```
+
+Data seed masih **sementara** dari prototipe lama (`js/data.js` dan bawaan POS lama). Bahan baku & resep (BoM) belum diisi karena datanya masih disiapkan. Pajak cabang memakai bawaan POS lama (PB1 10% sudah termasuk harga); ubah setelah dikonfirmasi.
 
 ## Sistem kasir (POS) multi-cabang
 

@@ -1,7 +1,7 @@
 // =====================================================================
 // Robbucca Unified POS & PWA System (Project Nectar) — skema database
-// DRAF FASE 1 untuk direview. Belum ada migrasi; jangan dijalankan ke
-// database produksi sebelum disetujui.
+// Disetujui sementara (10 Okt 2026), akan direvisi saat data final siap.
+// Perubahan skema = migrasi baru (`pnpm db:migrate`), jangan edit migrasi lama.
 //
 // Prinsip:
 // - Satu database PostgreSQL untuk 4 cabang (single source of truth).
