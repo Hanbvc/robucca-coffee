@@ -1,17 +1,20 @@
 /* Identitas pelanggan PWA: nomor WhatsApp + OTP 6 digit → token pelanggan (HMAC, 90 hari).
-   - Kode disimpan sebagai HMAC (tidak pernah teks biasa), berlaku 5 menit, maks. 5 kali salah.
-   - Permintaan kode dibatasi per nomor & per IP.
-   - Pengiriman WhatsApp/SMS belum tersambung: di luar produksi kode dicetak ke log server dan
-     dikembalikan di respons (devCode) agar bisa dicoba; di produksi tidak pernah dikembalikan.
-   Catatan: penyimpanan kode di memori proses (cukup untuk satu instance API). */
+   - Kode disimpan di tabel CustomerOtp sebagai HMAC berkunci AUTH_SECRET (tidak pernah teks biasa), berlaku 5 menit,
+     sekali pakai, hangus setelah 5 percobaan. Bertahan saat API dimulai ulang dan berlaku lintas instance.
+   - Permintaan kode dibatasi per nomor & per IP, tebakan salah per nomor (pembatas di memori: per instance API).
+   - Pengiriman: OTP_WEBHOOK_URL (gateway WhatsApp/SMS pilihan Robucca) menerima POST JSON {phone, code, message}.
+     Di luar produksi kode juga dicetak ke log dan dikembalikan sebagai devCode agar bisa dicoba.
+     Di produksi tanpa webhook, masuk dengan WhatsApp dimatikan (503); pelanggan tetap bisa memesan sebagai tamu. */
 import {
-  BadRequestException, type CanActivate, createParamDecorator, type ExecutionContext, Injectable, Logger, UnauthorizedException,
+  BadGatewayException, BadRequestException, type CanActivate, createParamDecorator, type ExecutionContext, Injectable, Logger,
+  ServiceUnavailableException, UnauthorizedException,
 } from '@nestjs/common';
 import { normalizePhone, randDigits } from '@robucca/core';
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { Prisma } from '@robucca/db';
+import { timingSafeEqual } from 'node:crypto';
 import type { Request } from 'express';
 import { RateLimiter } from '../../common/rate-limit';
-import { sign, verify } from '../../common/tokens';
+import { keyedHash, sign, verify } from '../../common/tokens';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export const OTP_TTL_MS = 5 * 60_000;
@@ -46,46 +49,88 @@ export function phoneOrThrow(input: string): string {
 @Injectable()
 export class CustomerAuthService {
   private readonly log = new Logger('OTP');
-  private readonly key = randomBytes(32);
-  private readonly codes = new Map<string, { hash: Buffer; exp: number; tries: number }>();
+  private readonly dev = process.env.NODE_ENV !== 'production';
+  private readonly webhook = process.env.OTP_WEBHOOK_URL || '';
   /** Permintaan kode: 3 per nomor per 10 menit, 10 per IP per 10 menit. */
   private readonly perPhone = new RateLimiter(3, 10 * 60_000, 10 * 60_000);
   private readonly perIp = new RateLimiter(Number(process.env.PUBLIC_OTP_IP_LIMIT) || 10, 10 * 60_000, 10 * 60_000);
   /** Verifikasi salah: 5 per nomor per 15 menit. */
   private readonly verifyFails = new RateLimiter(OTP_MAX_TRIES, 15 * 60_000, 15 * 60_000);
+  private requests = 0;
 
   constructor(private readonly prisma: PrismaService) {}
 
-  private hash(phone: string, code: string): Buffer {
-    return createHmac('sha256', this.key).update(`${phone}:${code}`).digest();
+  /** Masuk dengan WhatsApp tersedia (ada pengirim kode, atau mode pengembangan). */
+  get available(): boolean {
+    return this.dev || !!this.webhook;
   }
 
-  requestOtp(rawPhone: string, ip: string): { sent: true; phone: string; expiresIn: number; devCode?: string } {
+  private hash(phone: string, code: string): string {
+    return keyedHash('otp', `${phone}:${code}`);
+  }
+
+  async requestOtp(rawPhone: string, ip: string): Promise<{ sent: true; phone: string; expiresIn: number; devCode?: string }> {
+    if (!this.available) throw new ServiceUnavailableException('Masuk dengan WhatsApp belum tersedia. Kamu tetap bisa memesan sebagai tamu.');
     const phone = phoneOrThrow(rawPhone);
     hit(this.perIp, ip);
     hit(this.perPhone, phone);
     const code = randDigits(6);
-    this.codes.set(phone, { hash: this.hash(phone, code), exp: Date.now() + OTP_TTL_MS, tries: 0 });
-    if (this.codes.size > 50_000) for (const [k, v] of this.codes) if (v.exp < Date.now()) this.codes.delete(k);
-    const dev = process.env.NODE_ENV !== 'production';
-    // TODO: kirim lewat WhatsApp Business API / SMS. Sementara: log server (khusus pengembangan).
-    if (dev) this.log.log(`Kode OTP untuk ${phone}: ${code}`);
-    return { sent: true, phone, expiresIn: OTP_TTL_MS / 1000, ...(dev ? { devCode: code } : {}) };
+    const row = { codeHash: this.hash(phone, code), expiresAt: new Date(Date.now() + OTP_TTL_MS), attempts: 0, createdAt: new Date() };
+    await this.prisma.db.customerOtp.upsert({ where: { phone }, update: row, create: { phone, ...row } });
+    // Bersih-bersih kode lama sesekali (tabel kecil: satu baris per nomor, dihapus saat dipakai).
+    if (++this.requests % 100 === 0) await this.prisma.db.customerOtp.deleteMany({ where: { expiresAt: { lt: new Date(Date.now() - 3600e3) } } });
+    if (this.webhook) await this.deliver(phone, code, row.codeHash);
+    if (this.dev) this.log.log(`Kode OTP untuk ${phone}: ${code}`);
+    return { sent: true, phone, expiresIn: OTP_TTL_MS / 1000, ...(this.dev ? { devCode: code } : {}) };
+  }
+
+  /** Kirim kode lewat webhook gateway. Gagal → kode dihapus (tidak ada kode yatim yang bisa ditebak). */
+  private async deliver(phone: string, code: string, codeHash: string): Promise<void> {
+    const message = `Kode masuk Robucca: ${code}. Berlaku 5 menit. Jangan berikan kode ini kepada siapa pun.`;
+    try {
+      const r = await fetch(this.webhook, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(process.env.OTP_WEBHOOK_SECRET ? { authorization: `Bearer ${process.env.OTP_WEBHOOK_SECRET}` } : {}) },
+        body: JSON.stringify({ phone, code, message }),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } catch (e) {
+      this.log.warn(`Gagal mengirim OTP ke ${phone.slice(0, 5)}…: ${e instanceof Error ? e.message : String(e)}`);
+      await this.prisma.db.customerOtp.deleteMany({ where: { phone, codeHash } });
+      throw new BadGatewayException('Kode belum bisa dikirim ke WhatsApp. Coba lagi sebentar lagi.');
+    }
   }
 
   async verifyOtp(rawPhone: string, code: string, name?: string) {
     const phone = phoneOrThrow(rawPhone);
     this.verifyFails.check(phone);
-    const entry = this.codes.get(phone);
-    const ok = !!entry && entry.exp > Date.now() && entry.tries < OTP_MAX_TRIES && timingSafeEqual(entry.hash, this.hash(phone, code));
-    if (!ok) {
-      if (entry) entry.tries += 1;
-      this.verifyFails.fail(phone);
-      throw new UnauthorizedException(entry && entry.exp <= Date.now() ? 'Kode OTP sudah kedaluwarsa, minta kode baru' : 'Kode OTP salah');
-    }
-    this.codes.delete(phone);
-    this.verifyFails.ok(phone);
     const now = new Date();
+    // Setiap percobaan memakai satu jatah secara atomik (aman bila ada tebakan bersamaan).
+    let row: { codeHash: string } | null = null;
+    try {
+      row = await this.prisma.db.customerOtp.update({
+        where: { phone, attempts: { lt: OTP_MAX_TRIES }, expiresAt: { gt: now } },
+        data: { attempts: { increment: 1 } },
+        select: { codeHash: true },
+      });
+    } catch (e) {
+      if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025')) throw e;
+    }
+    const given = Buffer.from(this.hash(phone, code), 'hex');
+    const ok = !!row && timingSafeEqual(Buffer.from(row.codeHash, 'hex'), given);
+    // Sekali pakai: hanya satu verifikasi yang berhasil menghapus baris kode ini.
+    const used = ok && (await this.prisma.db.customerOtp.deleteMany({ where: { phone, codeHash: row!.codeHash } })).count === 1;
+    if (!used) {
+      this.verifyFails.fail(phone);
+      if (!row) {
+        const cur = await this.prisma.db.customerOtp.findUnique({ where: { phone }, select: { expiresAt: true, attempts: true } });
+        if (cur && cur.expiresAt <= now) throw new UnauthorizedException('Kode OTP sudah kedaluwarsa, minta kode baru');
+        if (cur && cur.attempts >= OTP_MAX_TRIES) throw new UnauthorizedException('Terlalu banyak percobaan, minta kode baru');
+      }
+      throw new UnauthorizedException('Kode OTP salah');
+    }
+    this.verifyFails.ok(phone);
     const customer = await this.prisma.db.customer.upsert({
       where: { phone },
       update: { phoneVerifiedAt: now, ...(name ? { name } : {}) },

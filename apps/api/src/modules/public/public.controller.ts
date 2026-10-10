@@ -48,6 +48,12 @@ export class PublicController {
 
   // --- Katalog ---------------------------------------------------------------
 
+  /** Konfigurasi aplikasi pelanggan: identitas brand & apakah masuk dengan WhatsApp tersedia. */
+  @Get('config')
+  config() {
+    return this.catalog.appConfig(this.auth.available);
+  }
+
   @Get('branches')
   branches() {
     return this.catalog.branches();

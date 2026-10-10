@@ -54,6 +54,11 @@ export class CatalogService {
     return { branch: this.publicBranch(b), taxConfig, org: { name: settings?.orgName ?? 'Robucca', instagram: settings?.instagram ?? null }, categories: menu.categories };
   }
 
+  async appConfig(otpLogin: boolean) {
+    const s = await this.prisma.db.organizationSetting.findUnique({ where: { id: 1 } });
+    return { org: { name: s?.orgName ?? 'Robucca', tagline: s?.tagline ?? null, instagram: s?.instagram ?? null }, otpLogin };
+  }
+
   banners() {
     return this.prisma.db.banner.findMany({
       where: { isActive: true },

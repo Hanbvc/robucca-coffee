@@ -69,6 +69,9 @@ async function login(n, name = 'Dinda') {
 }
 
 test('katalog publik: cabang, menu + pajak, banner, kurir, metode bayar', { skip }, async () => {
+  const cfg = (await call('GET', '/public/config')).body;
+  assert.equal(cfg.otpLogin, true, 'di luar produksi masuk OTP tersedia (kode dev)');
+  assert.ok(cfg.org.name);
   const b = await call('GET', '/public/branches');
   assert.ok(b.body.find((x) => x.code === 'IJN' && x.acceptsDelivery && x.lat));
   assert.equal(menu.branch.code, 'IJN');
@@ -86,12 +89,19 @@ test('OTP: kode salah ditolak, kode benar memberi token pelanggan; /me butuh tok
   const r = await call('POST', '/public/auth/otp', { phone: phone(1) });
   assert.equal(r.status, 200);
   assert.match(r.body.devCode, /^\d{6}$/);
+  // Disimpan di DB sebagai HMAC berkunci (bukan teks biasa), berlaku 5 menit
+  const row = await db.customerOtp.findUnique({ where: { phone: `62${phone(1).slice(1)}` } });
+  assert.match(row.codeHash, /^[0-9a-f]{64}$/);
+  assert.ok(!row.codeHash.includes(r.body.devCode));
+  assert.ok(Math.abs(row.expiresAt.getTime() - Date.now() - 300_000) < 10_000);
   const wrong = r.body.devCode === '000000' ? '111111' : '000000';
   assert.equal((await call('POST', '/public/auth/verify', { phone: phone(1), code: wrong })).status, 401);
+  assert.equal((await db.customerOtp.findUnique({ where: { phone: `62${phone(1).slice(1)}` } })).attempts, 1, 'percobaan salah tercatat');
   const ok = await call('POST', '/public/auth/verify', { phone: phone(1), code: r.body.devCode, name: 'Dinda Ayu' });
   assert.equal(ok.status, 200);
   assert.equal(ok.body.customer.phone, `62${phone(1).slice(1)}`);
   assert.equal((await call('POST', '/public/auth/verify', { phone: phone(1), code: r.body.devCode })).status, 401, 'kode sekali pakai');
+  assert.equal(await db.customerOtp.count({ where: { phone: `62${phone(1).slice(1)}` } }), 0, 'kode terpakai dihapus dari DB');
   const me = await call('GET', '/public/me', null, { 'x-customer-token': ok.body.token });
   assert.equal(me.body.name, 'Dinda Ayu');
   assert.ok(me.body.phoneVerifiedAt);

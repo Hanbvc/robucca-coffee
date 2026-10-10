@@ -17,6 +17,9 @@ function key(): Buffer {
   return secret;
 }
 
+/** HMAC-SHA256 (hex) berkunci AUTH_SECRET: menyimpan rahasia pendek (mis. kode OTP) tanpa teks biasa. */
+export const keyedHash = (purpose: string, value: string): string => createHmac('sha256', key()).update(`${purpose}:${value}`).digest('hex');
+
 /** Token bertanda tangan HMAC: base64url(payload).base64url(sig). */
 export function sign(payload: Record<string, unknown>, ttlSeconds: number): string {
   const body = Buffer.from(JSON.stringify({ ...payload, exp: Math.floor(Date.now() / 1000) + ttlSeconds })).toString('base64url');
