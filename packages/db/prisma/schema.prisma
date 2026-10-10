@@ -309,15 +309,18 @@ model UserBranch {
 /// Perangkat POS/KDS yang dipasangkan ke cabang (token disimpan sebagai hash).
 /// branchId kosong = komputer kantor pusat.
 model Device {
-  id         String    @id @default(uuid(7)) @db.Uuid
-  branchId   String?   @db.Uuid
-  name       String
+  id               String    @id @default(uuid(7)) @db.Uuid
+  branchId         String?   @db.Uuid
+  name             String
   /// Nomor terminal di cabang, bagian dari nomor struk. 0 untuk kantor pusat.
-  terminalNo Int       @db.SmallInt
-  tokenHash  String?   @unique
-  lastSeenAt DateTime? @db.Timestamptz(3)
-  revokedAt  DateTime? @db.Timestamptz(3)
-  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  terminalNo       Int       @db.SmallInt
+  tokenHash        String?   @unique
+  /// Kode pasang 6 digit (hash SHA-256) untuk menautkan perangkat baru; dihapus setelah dipakai.
+  pairingCodeHash  String?   @unique
+  pairingExpiresAt DateTime? @db.Timestamptz(3)
+  lastSeenAt       DateTime? @db.Timestamptz(3)
+  revokedAt        DateTime? @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @db.Timestamptz(3)
 
   branch Branch? @relation(fields: [branchId], references: [id], onDelete: Restrict)
   shifts Shift[]
@@ -706,17 +709,20 @@ model Order {
 
   // --- Ringkasan nilai (rupiah). Identitas: total = subtotal − discountTotal (net) + serviceCharge + tax (bila belum termasuk) + deliveryFee + rounding
   subtotal      Int
-  discountTotal Int     @default(0)
-  serviceCharge Int     @default(0)
-  taxTotal      Int     @default(0)
+  discountTotal Int          @default(0)
+  serviceCharge Int          @default(0)
+  taxTotal      Int          @default(0)
   /// Ongkir delivery (dibayar pelanggan, di luar dasar pajak).
-  deliveryFee   Int     @default(0)
-  rounding      Int     @default(0)
+  deliveryFee   Int          @default(0)
+  rounding      Int          @default(0)
   total         Int
   // --- Konfigurasi pajak saat transaksi (salinan dari Branch; tarif bisa berubah kemudian)
   taxRateBp     Int
   taxInclusive  Boolean
-  serviceRateBp Int     @default(0)
+  serviceRateBp Int          @default(0)
+  taxOnService  Boolean      @default(true)
+  roundingUnit  Int          @default(1)
+  roundingMode  RoundingMode @default(DOWN)
 
   discountNote         String?
   discountApprovedById String?   @db.Uuid
