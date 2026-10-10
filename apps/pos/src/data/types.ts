@@ -117,7 +117,10 @@ export interface MPromo {
 export interface MStaff {
   id: string;
   name: string;
+  /** null untuk penyetuju (manajer/pemilik) di mode server: hash PIN-nya tidak dikirim ke perangkat. */
   pinHash: string | null;
+  /** true = hanya bisa login & menyetujui saat perangkat online (PIN diperiksa server). */
+  onlineOnly?: boolean;
   role: RoleCode;
   permissions: string[];
 }

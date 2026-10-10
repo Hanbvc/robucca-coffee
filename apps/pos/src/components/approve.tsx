@@ -1,15 +1,18 @@
 /* Persetujuan manajer (PIN) untuk void, refund, dan diskon di atas batas kasir. Port dari pos/js/components/approve.js. */
 import { useState, type ReactNode } from 'react';
-import type { Approval } from '../data/backend';
+import { APPROVAL_NEEDS_NET, type Approval } from '../data/backend';
 import { APPROVE_PERM, roleName, type ApproveKind } from '../data/master';
 import type { MStaff } from '../data/types';
 import { Icon } from '../lib/icons';
-import { S, can, master } from '../state';
+import { S, can, master, useApp } from '../state';
 import { Avatar, PinPad, useKeys } from '../ui/common';
 import { Modal, openLayer, type Close } from '../ui/overlay';
 
 function ApproveBody({ kind, title, text, close }: { kind: ApproveKind; title: string; text: ReactNode; close: Close<Approval> }) {
+  useApp(); // render ulang saat status jaringan berubah
   const approvers = master().approvers(kind);
+  // Mode server: PIN penyetuju hanya diperiksa server → tanpa koneksi tidak bisa disetujui.
+  const offline = S.be.offline;
   const [who, setWho] = useState<MStaff | null>(approvers.length === 1 ? approvers[0]! : null);
   const [pin, setPin] = useState('');
   const [msg, setMsg] = useState('');
@@ -18,7 +21,15 @@ function ApproveBody({ kind, title, text, close }: { kind: ApproveKind; title: s
   const submit = async (p: string) => {
     if (!who || p.length < 4 || busy) return;
     setBusy(true);
-    const ok = await S.be.approve(kind, who.id, p);
+    let ok: Approval | null = null;
+    try {
+      ok = await S.be.approve(kind, who.id, p);
+    } catch (e) {
+      setBusy(false);
+      setPin('');
+      setMsg(e instanceof Error ? e.message : String(e));
+      return;
+    }
     setBusy(false);
     if (ok) {
       close(ok);
@@ -49,7 +60,14 @@ function ApproveBody({ kind, title, text, close }: { kind: ApproveKind; title: s
   return (
     <Modal title={title} sub={text} size="sm">
       <div id="ap">
-        {!who ? (
+        {offline ? (
+          <div className="note" data-offline>
+            <Icon name="wifi-off" size="sm" />
+            <span>
+              <b>{APPROVAL_NEEDS_NET}.</b> PIN manajer/pemilik hanya diperiksa server pusat. Sambungkan perangkat ke internet, lalu coba lagi.
+            </span>
+          </div>
+        ) : !who ? (
           approvers.length ? (
             <div className="list">
               {approvers.map((s) => (

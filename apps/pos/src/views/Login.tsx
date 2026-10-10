@@ -1,4 +1,5 @@
-/* Login staf dengan PIN (diverifikasi di perangkat dengan hash dari master, jadi tetap bisa saat offline).
+/* Login staf dengan PIN. Kasir/dapur diverifikasi di perangkat dengan hash dari master (tetap bisa offline);
+   manajer/pemilik (staf penyetuju) di mode server hanya lewat server karena hash PIN-nya tidak dikirim ke perangkat.
    Port dari pos/js/views/login.js. */
 import { businessDate, clock, dateLabel, tzLabel } from '@robucca/core';
 import { useEffect, useState } from 'react';
@@ -6,7 +7,7 @@ import { DEMO_PINS } from '../data/demo-info';
 import { roleName } from '../data/master';
 import type { MStaff } from '../data/types';
 import { Icon } from '../lib/icons';
-import { S, homeFor, master, nav, setShift, setUser } from '../state';
+import { S, homeFor, master, nav, setShift, setUser, useApp } from '../state';
 import { Avatar, PinPad, useKeys } from '../ui/common';
 
 export function LoginView() {
@@ -14,7 +15,10 @@ export function LoginView() {
   const m = master();
   const b = m.branch;
   const tz = b?.timezone ?? 'Asia/Jakarta';
-  const people = m.staff.filter((s) => !!s.pinHash);
+  useApp(); // status jaringan
+  const people = m.staff;
+  const offline = be.offline;
+  const blocked = (s: MStaff) => offline && be.needsServer(s);
   const [who, setWho] = useState<MStaff | null>(people.length === 1 ? people[0]! : null);
   const [pin, setPin] = useState('');
   const [msg, setMsg] = useState('');
@@ -35,7 +39,7 @@ export function LoginView() {
     setBusy(false);
     if (!res.ok) {
       setPin('');
-      setMsg(res.locked ? `Terlalu banyak percobaan. Coba lagi dalam ${res.locked} detik.` : 'PIN salah.');
+      setMsg(res.error ?? (res.locked ? `Terlalu banyak percobaan. Coba lagi dalam ${res.locked} detik.` : 'PIN salah.'));
       setShake(true);
       setTimeout(() => setShake(false), 450);
       return;
@@ -114,6 +118,11 @@ export function LoginView() {
                     <Avatar staff={s} />
                     <b>{s.name}</b>
                     <span className="tag">{roleName(s.role)}</span>
+                    {blocked(s) && (
+                      <span className="tag" data-online-only style={{ color: 'var(--red)' }}>
+                        <Icon name="wifi-off" size="xs" /> butuh koneksi
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -121,6 +130,14 @@ export function LoginView() {
               <div className="note red">
                 <Icon name="alert" size="sm" />
                 <span>Belum ada staf aktif untuk {b ? 'cabang ini' : 'kantor pusat'}. Tambahkan staf dari kantor pusat.</span>
+              </div>
+            )}
+            {offline && people.some((s) => be.needsServer(s)) && (
+              <div className="note" style={{ marginTop: 14 }} data-offline-note>
+                <Icon name="wifi-off" size="sm" />
+                <span>
+                  Perangkat sedang offline. Kasir & dapur tetap bisa masuk. <b>Manajer & pemilik hanya bisa masuk saat online</b> — PIN mereka diperiksa server pusat.
+                </span>
               </div>
             )}
             {be.isDemo && (
@@ -133,7 +150,7 @@ export function LoginView() {
         ) : (
           <PinPad
             pin={pin}
-            msg={busy ? 'Memeriksa…' : msg}
+            msg={busy ? 'Memeriksa…' : msg || (blocked(who) ? `Tidak ada koneksi. ${who.name} hanya bisa masuk saat perangkat online.` : '')}
             shake={shake}
             onKey={key}
             top={

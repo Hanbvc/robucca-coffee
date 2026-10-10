@@ -18,12 +18,12 @@ import type { AuditDoc, CashMove, DeviceInfo, KitchenMark, MasterSnapshot, MStaf
 
 const SYNC_EVERY = 15000;
 const KEEP_DAYS = 14;
-/** Token persetujuan berlaku 5 menit di server; setelah ini kirim sebagai persetujuan offline. */
-const APPROVAL_FRESH_MS = 4 * 60e3;
+/** Pesan bila persetujuan manajer diminta saat offline (PIN penyetuju hanya diperiksa server). */
+export const APPROVAL_NEEDS_NET = 'Butuh koneksi untuk persetujuan manajer';
 
 export interface Approval {
   staff: MStaff;
-  /** token dari POST /pos/approve (hanya saat online) */
+  /** token dari POST /pos/approve (mode server; tanpa token hanya untuk staf login yang berhak sendiri) */
   token?: string;
   at: number;
 }
@@ -250,25 +250,60 @@ export class Backend {
     return f && f.until > Date.now() ? Math.ceil((f.until - Date.now()) / 1000) : 0;
   }
 
+  private failed(staffId: string): void {
+    const f = this.fails.get(staffId) ?? { n: 0, until: 0 };
+    f.n += 1;
+    if (f.n >= 5) {
+      f.until = Date.now() + 30000;
+      f.n = 0;
+    }
+    this.fails.set(staffId, f);
+  }
+
   private async checkPin(staff: MStaff, pin: string): Promise<boolean> {
     if (this.lockedFor(staff.id) || !staff.pinHash) return false;
     const ok = await bcrypt.compare(pin, staff.pinHash);
     if (!ok) {
-      const f = this.fails.get(staff.id) ?? { n: 0, until: 0 };
-      f.n += 1;
-      if (f.n >= 5) {
-        f.until = Date.now() + 30000;
-        f.n = 0;
-      }
-      this.fails.set(staff.id, f);
+      this.failed(staff.id);
       return false;
     }
     this.fails.delete(staff.id);
     return true;
   }
 
-  async login(staff: MStaff, pin: string): Promise<{ ok: boolean; locked: number }> {
+  /** Staf yang PIN-nya hanya bisa diperiksa server (penyetuju di mode server). */
+  needsServer(staff: MStaff): boolean {
+    return !staff.pinHash;
+  }
+
+  /** Perangkat diketahui offline (status SSE/sinkron terakhir atau browser). */
+  get offline(): boolean {
+    return this.isServer && (this.online === false || (typeof navigator !== 'undefined' && navigator.onLine === false));
+  }
+
+  async login(staff: MStaff, pin: string): Promise<{ ok: boolean; locked: number; error?: string }> {
     if (this.lockedFor(staff.id)) return { ok: false, locked: this.lockedFor(staff.id) };
+    if (this.needsServer(staff)) {
+      // PIN manajer/pemilik tidak ada di perangkat: login hanya lewat server.
+      if (!this.api) return { ok: false, locked: 0, error: 'Staf ini hanya bisa masuk saat perangkat terhubung ke server.' };
+      this.api.session = null;
+      this.loginPin = { staffId: staff.id, pin };
+      try {
+        await this.serverLogin();
+        this.fails.delete(staff.id);
+        this.setOnline(true);
+        return { ok: true, locked: 0 };
+      } catch (e) {
+        this.loginPin = null;
+        if (isOffline(e)) {
+          this.setOnline(false);
+          return { ok: false, locked: 0, error: `Tidak ada koneksi. ${staff.name} hanya bisa masuk saat perangkat online.` };
+        }
+        if (e instanceof ApiError && e.status === 429) return { ok: false, locked: 30, error: e.message };
+        this.failed(staff.id);
+        return { ok: false, locked: this.lockedFor(staff.id) };
+      }
+    }
     if (!(await this.checkPin(staff, pin))) return { ok: false, locked: this.lockedFor(staff.id) };
     this.loginPin = { staffId: staff.id, pin };
     if (this.api) {
@@ -305,22 +340,39 @@ export class Backend {
     ss.del('pos:session');
   }
 
-  /** Verifikasi PIN penyetuju (manajer/pemilik) untuk void, refund, & diskon. */
-  async approve(kind: ApproveKind, staffId: string, pin: string): Promise<Approval | null> {
+  /**
+   * Verifikasi PIN penyetuju (manajer/pemilik) untuk void, refund, & diskon.
+   * Mode demo: diperiksa di perangkat. Mode server: hanya lewat POST /pos/approve (hash PIN penyetuju
+   * tidak pernah dikirim ke perangkat) → saat offline melempar Error(APPROVAL_NEEDS_NET).
+   */
+  async approve(kind: ApproveKind, staffId: string, pin: string, retried = false): Promise<Approval | null> {
     const s = this.master?.person(staffId);
     if (!s || !can(s, APPROVE_PERM[kind])) return null;
-    if (!(await this.checkPin(s, pin))) return null;
-    const out: Approval = { staff: s, at: Date.now() };
-    if (this.isServer && this.api && (await this.ensureSession())) {
-      try {
-        const r = await this.api.post<{ approval: string; approver: { id: string } }>('/pos/approve', { pin, permission: APPROVE_PERM[kind] }, { session: true, timeout: 8000 });
-        if (r.approver.id === s.id) out.token = r.approval;
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 401 && !/sesi|masuk/i.test(e.message)) return null; // PIN berubah di server
-        /* offline: persetujuan dicatat sebagai offline (server memeriksa hak penyetuju) */
+    if (!this.isServer) return (await this.checkPin(s, pin)) ? { staff: s, at: Date.now() } : null;
+    if (this.lockedFor(s.id)) return null;
+    if (!this.api || !(await this.ensureSession())) throw new Error(APPROVAL_NEEDS_NET);
+    try {
+      const r = await this.api.post<{ approval: string; approver: { id: string } }>('/pos/approve', { pin, permission: APPROVE_PERM[kind] }, { session: true, timeout: 8000 });
+      if (r.approver.id !== s.id) return null;
+      this.fails.delete(s.id);
+      return { staff: s, token: r.approval, at: Date.now() };
+    } catch (e) {
+      if (isOffline(e)) {
+        this.setOnline(false);
+        throw new Error(APPROVAL_NEEDS_NET);
       }
+      if (e instanceof ApiError && e.status === 401 && /sesi|masuk/i.test(e.message)) {
+        // Sesi server kedaluwarsa: buat ulang dari PIN staf yang login lalu coba sekali lagi.
+        this.api.session = null;
+        if (!retried && (await this.ensureSession())) return this.approve(kind, staffId, pin, true);
+        throw new Error('Sesi server berakhir. Kunci layar lalu masuk lagi.');
+      }
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        this.failed(s.id);
+        return null;
+      }
+      throw e;
     }
-    return out;
   }
 
   /* =========================================================
@@ -521,20 +573,11 @@ export class Backend {
 
   private buildBody(entries: OutboxEntry[], docs: Map<string, AnyDoc>) {
     const body: Record<string, unknown[]> = { shifts: [], cashMovements: [], orders: [], kitchen: [], audit: [] };
-    const now = Date.now();
     for (const e of entries) {
       const d = docs.get(e.k);
       if (!d) continue;
-      if (e.coll === 'orders') {
-        const o = d as unknown as Order;
-        const doc = toServerOrder(o);
-        // Token persetujuan kedaluwarsa (dibuat lama sebelum terkirim) → kirim sebagai persetujuan offline.
-        if (o.approvalAt && now - o.approvalAt > APPROVAL_FRESH_MS) {
-          delete doc.discountApproval;
-          delete doc.voidApproval;
-        }
-        body.orders!.push(doc);
-      } else if (e.coll === 'shifts') body.shifts!.push(toServerShift(d as unknown as Shift));
+      // Token persetujuan selalu ikut terkirim; server menerimanya hingga 24 jam setelah kedaluwarsa (sekali pakai).
+      if (e.coll === 'orders') body.orders!.push(toServerOrder(d as unknown as Order)); else if (e.coll === 'shifts') body.shifts!.push(toServerShift(d as unknown as Shift));
       else if (e.coll === 'cashMoves') body.cashMovements!.push(toServerCash(d as unknown as CashMove));
       else if (e.coll === 'kitchen') body.kitchen!.push(toServerKitchen(d as unknown as KitchenMark));
       else if (e.coll === 'audit') body.audit!.push(toServerAudit(d as unknown as AuditDoc));

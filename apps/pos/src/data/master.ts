@@ -162,7 +162,7 @@ export class Master {
 
   /** Staf yang boleh menyetujui (PIN) tindakan tertentu. */
   approvers(kind: ApproveKind): MStaff[] {
-    return this.staff.filter((s) => !!s.pinHash && can(s, APPROVE_PERM[kind]));
+    return this.staff.filter((s) => can(s, APPROVE_PERM[kind]));
   }
 }
 
