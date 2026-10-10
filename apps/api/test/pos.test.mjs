@@ -170,11 +170,23 @@ test('persetujuan offline (hanya ID manajer, tanpa token server) ditolak; token 
   assert.match(r.body.orders[0].errors[0], /offline tidak diterima/);
   const appr = await call('POST', '/pos/approve', { pin: '2222', permission: 'discount.approve' }, ses());
   const a = order({ discount: { type: 'PERCENT', value: 5000 }, payments: pays(), discountApproval: appr.body.approval });
-  assert.equal((await call('POST', '/pos/sync', { orders: [a] }, dev())).body.orders[0].status, 'saved');
+  const ra = await call('POST', '/pos/sync', { orders: [a] }, dev());
+  assert.equal(ra.body.orders[0].status, 'saved', JSON.stringify(ra.body) + JSON.stringify(appr));
   const b = order({ discount: { type: 'PERCENT', value: 5000 }, payments: pays(), discountApproval: appr.body.approval });
   const reuse = await call('POST', '/pos/sync', { orders: [b] }, dev());
   assert.equal(reuse.body.orders[0].status, 'rejected');
   assert.match(reuse.body.orders[0].errors[0], /sudah dipakai/);
+});
+
+test('shift kedua untuk terminal yang sama ditolak; shift terbuka bisa dipulihkan perangkat', { skip }, async () => {
+  const dup = randomUUID();
+  const r = await call('POST', '/pos/sync', { shifts: [{ id: dup, status: 'OPEN', openedAt: new Date().toISOString(), openingCash: 100000, openedById: ids.sari }] }, dev());
+  assert.equal(r.body.shifts[0].status, 'rejected');
+  assert.match(r.body.shifts[0].errors[0], /masih punya shift terbuka/);
+  const open = await call('GET', '/pos/shift/open', null, dev());
+  assert.equal(open.status, 200);
+  assert.equal(open.body.shift.id, ids.shift);
+  assert.equal(open.body.shift.openingCash, 200000);
 });
 
 test('tagihan terbuka diubah di versi berikut; versi lama = konflik; status dapur dipertahankan', { skip }, async () => {

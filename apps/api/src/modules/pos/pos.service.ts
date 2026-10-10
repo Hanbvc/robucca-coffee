@@ -76,6 +76,16 @@ export class PosService {
     if (!opener || (opener.role.code !== 'SUPER_ADMIN' && !opener.branches.some((b) => b.branchId === branchId))) {
       return { id: s.id, status: 'rejected', errors: ['Staf pembuka shift tidak dikenal di cabang ini'] };
     }
+    // Satu terminal hanya boleh punya satu shift terbuka (mis. perangkat dipasang ulang lalu membuka shift baru).
+    if (!prev && s.status === 'OPEN') {
+      const other = await this.prisma.db.shift.findFirst({
+        where: { branchId, status: 'OPEN', OR: [{ deviceId: device.id }, { device: { terminalNo: device.terminalNo } }] },
+        select: { openedAt: true, openedBy: { select: { name: true } } },
+      });
+      if (other) {
+        return { id: s.id, status: 'rejected', errors: [`Terminal ${device.terminalNo} masih punya shift terbuka (dibuka ${other.openedBy.name}). Lanjutkan shift itu atau tutup dulu.`] };
+      }
+    }
     if (s.status === 'CLOSED' && (s.countedCash == null || !s.closedAt || !s.closedById)) {
       return { id: s.id, status: 'rejected', errors: ['Tutup shift butuh kas dihitung, waktu, dan staf'] };
     }
