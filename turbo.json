@@ -41,6 +41,13 @@
       ],
       "cache": false,
       "persistent": true
+    },
+    "test": {
+      "dependsOn": [
+        "^build",
+        "^db:generate"
+      ],
+      "outputs": []
     }
   }
 }

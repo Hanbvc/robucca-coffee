@@ -11,6 +11,7 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
+    "test:apps": "turbo run test",
     "db:validate": "pnpm --filter @robucca/db db:validate",
     "db:format": "pnpm --filter @robucca/db db:format",
     "db:generate": "pnpm --filter @robucca/db db:generate",
