@@ -8,22 +8,14 @@ import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { derivedDb, ensureDb } from './test-db.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const api = path.resolve(here, '..');
 const dbPkg = path.resolve(here, '../../../packages/db');
 
-function officeUrl() {
-  if (process.env.OFFICE_TEST_DATABASE_URL) return process.env.OFFICE_TEST_DATABASE_URL;
-  const src = process.env.TEST_DATABASE_URL;
-  if (!src) return null;
-  const u = new URL(src);
-  const name = u.pathname.replace(/^\//, '');
-  u.pathname = `/${name}_office`;
-  return { url: u.toString(), name: `${name}_office`, admin: src };
-}
-const target = officeUrl();
-const URL_ = typeof target === 'string' ? target : target?.url;
+const target = derivedDb('_office', process.env.OFFICE_TEST_DATABASE_URL);
+const URL_ = target?.url;
 const PORT = 3260 + Math.floor(Math.random() * 50);
 const base = `http://127.0.0.1:${PORT}`;
 const env = { ...process.env, DATABASE_URL: URL_, AUTH_SECRET: 'tes-rahasia-yang-panjangnya-lebih-dari-32-karakter', PORT: String(PORT) };
@@ -57,13 +49,7 @@ const optionId = (p, name) => p.modifierGroups.flatMap((g) => g.options).find((o
 
 before(async () => {
   if (!URL_) return;
-  if (typeof target === 'object') {
-    const { createPrismaClient } = await import('@robucca/db');
-    const admin = createPrismaClient(target.admin);
-    const exists = await admin.$queryRawUnsafe('SELECT 1 FROM pg_database WHERE datname = $1', target.name);
-    if (!exists.length) await admin.$executeRawUnsafe(`CREATE DATABASE "${target.name.replace(/"/g, '')}"`);
-    await admin.$disconnect();
-  }
+  await ensureDb(target);
   execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], { cwd: dbPkg, env, stdio: 'ignore' });
   execFileSync('node', ['dist/seed/index.js'], { cwd: dbPkg, env: { ...env, SEED_DEMO: '1' }, stdio: 'ignore' });
   const { createPrismaClient } = await import('@robucca/db');

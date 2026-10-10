@@ -1,5 +1,5 @@
 /* Tes integrasi API publik PWA (/public/*) terhadap PostgreSQL sungguhan.
-   Pakai database tes sendiri, mis.: TEST_DATABASE_URL=postgresql://…/robucca_public_test pnpm --filter @robucca/api test
+   Database: PUBLIC_TEST_DATABASE_URL, atau turunan TEST_DATABASE_URL dengan nama "<nama>_public" (dibuat otomatis).
    Migrasi (deploy) & seed demo dijalankan otomatis; tes menambah data, tidak menghapus apa pun. */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,8 +7,11 @@ import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { derivedDb, ensureDb } from './test-db.mjs';
 
-const URL_ = process.env.TEST_DATABASE_URL;
+const target = derivedDb('_public', process.env.PUBLIC_TEST_DATABASE_URL);
+const URL_ = target?.url;
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const api = path.resolve(here, '..');
 const dbPkg = path.resolve(here, '../../../packages/db');
@@ -29,6 +32,7 @@ const call = async (method, p, body, headers = {}) => {
 
 before(async () => {
   if (!URL_) return;
+  await ensureDb(target);
   execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], { cwd: dbPkg, env, stdio: 'ignore' });
   execFileSync('node', ['dist/seed/index.js'], { cwd: dbPkg, env: { ...env, SEED_DEMO: '1' }, stdio: 'ignore' });
   const out = execFileSync('node', ['dist/cli/pair.js', '--branch', 'IJN', '--terminal', String(10 + Math.floor(Math.random() * 80)), '--name', 'Kasir tes PWA'], { cwd: api, env }).toString();
@@ -149,7 +153,10 @@ test('pesanan Pick Up: total dihitung server (harga + opsi + pajak termasuk), st
 test('ditolak: opsi asing, pilihan wajib kosong, harga satuan & total dimanipulasi, bayar online di delivery saja', { skip }, async () => {
   const p = latte();
   const baseOrder = { branchCode: 'IJN', type: 'CLICK_COLLECT', name: 'Iseng', phone: phone(5), payment: 'cashier' };
-  const foreign = await call('POST', '/public/orders', { ...baseOrder, items: [{ productId: p.id, optionIds: [opt(product('kopi-kelapa'), 'Less Ice')], quantity: 1 }] });
+  // Opsi dari grup yang tidak dimiliki Caffe Latte (grup identik dipakai bersama antarmenu, jadi cari grup lain).
+  const latteGroups = new Set(p.modifierGroups.map((g) => g.id));
+  const foreignOpt = menu.categories.flatMap((c) => c.products).flatMap((x) => x.modifierGroups).find((g) => !latteGroups.has(g.id)).options[0].id;
+  const foreign = await call('POST', '/public/orders', { ...baseOrder, items: [{ productId: p.id, optionIds: [opt(p, 'Iced · Regular'), foreignOpt], quantity: 1 }] });
   assert.equal(foreign.status, 400);
   assert.match(foreign.body.message, /pilihan tidak cocok/);
   const random = await call('POST', '/public/orders', { ...baseOrder, items: [{ productId: p.id, optionIds: [randomUUID()], quantity: 1 }] });
