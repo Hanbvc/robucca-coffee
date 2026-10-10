@@ -77,7 +77,8 @@ async function payCash(page, shotName) {
   page.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
 
-  // 1. Pasang perangkat
+  // 1. Pasang perangkat (catat dulu apakah terminal 1 masih punya shift terbuka dari run sebelumnya)
+  const resumed = sql(`select count(*) from "Shift" s join "Device" d on d.id=s."deviceId" join "Branch" b on b.id=d."branchId" where b.code='IJN' and d."terminalNo"=1 and s.status='OPEN'`) !== '0';
   const pairOut = execSync(`DATABASE_URL='${DB}' node ${WT}/apps/api/dist/cli/pair.js --branch IJN --terminal 1 --name "Kasir 1"`).toString();
   const code = pairOut.match(/Kode pasang: (\d{6})/)[1];
   log('kode pasang', code);
@@ -95,11 +96,19 @@ async function payCash(page, shotName) {
   await page.click('.staff:has-text("Sari")');
   await pin(page, '3333');
   await page.click('.split .keypad [data-k="ok"]').catch(() => {});
-  await page.waitForSelector('.modal:has-text("Buka shift")', { timeout: 10000 });
-  await page.click('.modal [data-q="300000"]');
-  await page.click('.modal [data-ok]');
-  await page.waitForSelector('.prod');
-  log('login Sari & shift dibuka');
+  // Terminal yang dipasang ulang melanjutkan shift yang masih terbuka di server (run sebelumnya), tanpa dialog buka shift.
+  if (resumed) {
+    await page.waitForSelector('.prod');
+    await wait(1500);
+    if (await page.locator('.modal:has-text("Buka shift")').count()) throw new Error('shift terbuka di server tidak dilanjutkan');
+    log('login Sari, shift terbuka dari server dilanjutkan');
+  } else {
+    await page.waitForSelector('.modal:has-text("Buka shift")', { timeout: 15000 });
+    await page.click('.modal [data-q="300000"]');
+    await page.click('.modal [data-ok]');
+    await page.waitForSelector('.prod');
+    log('login Sari & shift dibuka');
+  }
 
   // 3. Jual iced latte + opsi, tunai
   await page.locator('.prod', { has: page.locator('.pn', { hasText: /^Caffe Latte$/ }) }).first().click();
@@ -215,7 +224,39 @@ async function payCash(page, shotName) {
   log('pesanan PWA tampil di tagihan & dapur, dibayar di kasir → PAID di server');
 
 
-  // 6c. Refund (online) pesanan offline tadi, disetujui Dewi
+  // 6b2. Tutup shift (masukkan total + catatan selisih), lalu buka shift baru: transaksi tadi kini di luar shift berjalan
+  await page.goto(BASE.replace('?nosw', '?nosw#/shift'));
+  await page.click('[data-a="close"]');
+  const openBills = page.locator('.modal:has-text("Masih ada tagihan terbuka")');
+  if (await openBills.count().then((n) => n || openBills.waitFor({ timeout: 1500 }).then(() => 1, () => 0))) await top(page).locator('[data-ok]').click();
+  await page.waitForSelector('.modal:has-text("Tutup shift")');
+  await top(page).locator('[data-mode="direct"]').click();
+  // Masukkan persis "kas seharusnya" → kas cocok
+  const expected = (await top(page).locator('.mini:has-text("Kas seharusnya") b').innerText()).replace(/\D/g, '');
+  for (const k of expected) await top(page).locator(`[data-np="${k}"]`).click();
+  if ((await top(page).locator('#cs-diff').innerText()).replace(/\D/g, '') !== '0') throw new Error('kas dihitung tidak sama dengan seharusnya');
+  await page.screenshot({ path: `${SHOTS}/12c2-tutup-shift.png` });
+  await top(page).locator('[data-ok]').click();
+  await page.waitForSelector('.modal:has-text("Shift ditutup") .done-box');
+  await wait(600); // animasi masuk modal
+  await page.screenshot({ path: `${SHOTS}/12c3-shift-ditutup.png` });
+  await top(page).locator('button:has-text("Selesai")').click();
+  // Seperti POS lama: tutup shift = keluar. Login lagi lalu buka shift baru.
+  await page.waitForSelector('.staff-grid', { timeout: 15000 });
+  let sst = '';
+  for (let i = 0; i < 30 && sst !== 'CLOSED'; i++) { await wait(500); sst = sql(`select s.status from "Shift" s join "Device" d on d.id=s."deviceId" where d.name='Kasir 1' order by s."openedAt" desc limit 1`); }
+  if (sst !== 'CLOSED') throw new Error('tutup shift tidak sampai server: ' + sst);
+  await page.goto(BASE.replace('?nosw', '?nosw#/kasir'));
+  await page.click('.staff:has-text("Sari")');
+  await pin(page, '3333');
+  await page.click('.split .keypad [data-k="ok"]').catch(() => {});
+  await page.waitForSelector('.modal:has-text("Buka shift")', { timeout: 15000 });
+  await page.click('.modal [data-q="300000"]');
+  await page.click('.modal [data-ok]');
+  await page.waitForSelector('.prod');
+  log('shift ditutup (server: CLOSED), keluar, login lagi & shift baru dibuka');
+
+  // 6c. Refund (online) transaksi lunas dari shift sebelumnya, disetujui Dewi
   await page.goto(BASE.replace('?nosw', '?nosw#/riwayat'));
   // refund hanya untuk transaksi lunas di luar shift berjalan (di shift berjalan → void); pakai transaksi run sebelumnya
   await page.waitForSelector('[data-o]');
@@ -225,8 +266,8 @@ async function payCash(page, shotName) {
     await rows.nth(i).click();
     if (await page.locator('#h-detail [data-od="refund"]').count()) refNo = (await rows.nth(i).innerText()).match(/[A-Z0-9]+-[A-Z0-9-]{6,}/)[0];
   }
-  if (!refNo) { log('LEWATI refund: belum ada transaksi lunas dari shift sebelumnya (jalankan ulang skrip)'); }
-  else {
+  if (!refNo) throw new Error('tidak ada transaksi lunas dari shift sebelumnya untuk direfund');
+  {
   await page.click('#h-detail [data-od="refund"]');
   const ap2 = top(page);
   await ap2.locator('[data-s]:has-text("Dewi")').click().catch(() => {});
