@@ -1,16 +1,31 @@
 {
   "name": "robucca",
   "private": true,
-  "description": "Robucca: aplikasi pemesanan pelanggan + sistem POS multi-cabang (kasir, dapur, kantor pusat).",
+  "description": "Robbucca Unified POS & PWA System (Project Nectar). Monorepo: apps/api (NestJS), apps/pos (React + Vite), apps/pwa (Next.js), packages/db (Prisma + PostgreSQL). POS & PWA lama di root (pos/, server/, index.html) disimpan sebagai acuan.",
   "type": "module",
+  "packageManager": "pnpm@10.28.0",
   "engines": {
     "node": ">=22.13"
   },
   "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test:apps": "turbo run test",
+    "db:validate": "pnpm --filter @robucca/db db:validate",
+    "db:format": "pnpm --filter @robucca/db db:format",
+    "db:generate": "pnpm --filter @robucca/db db:generate",
+    "db:migrate": "pnpm --filter @robucca/db db:migrate",
+    "db:deploy": "pnpm --filter @robucca/db db:deploy",
+    "db:seed": "pnpm --filter @robucca/db build && pnpm --filter @robucca/db db:seed",
     "start": "node --no-warnings=ExperimentalWarning server/server.js",
     "start:demo": "node --no-warnings=ExperimentalWarning server/server.js --demo",
     "pair": "node --no-warnings=ExperimentalWarning server/server.js pair",
     "test": "node --no-warnings=ExperimentalWarning --test tests/*.test.js",
     "test:e2e": "node --no-warnings=ExperimentalWarning tests/e2e/run.js"
+  },
+  "devDependencies": {
+    "turbo": "2.11.7",
+    "typescript": "5.9.3"
   }
 }

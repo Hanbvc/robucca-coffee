@@ -1,0 +1,17 @@
+{
+  "name": "Robucca POS — Kasir & Dapur",
+  "short_name": "Robucca POS",
+  "description": "Sistem kasir multi-cabang Robucca: penjualan, dapur, shift, dan antrean.",
+  "start_url": "./#/",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#01512C",
+  "theme_color": "#01512C",
+  "lang": "id",
+  "icons": [
+    { "src": "assets/brand/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "assets/brand/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "assets/brand/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

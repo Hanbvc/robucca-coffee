@@ -1,0 +1,4 @@
+{
+  "extends": "@robucca/tsconfig/react-vite.json",
+  "include": ["src"]
+}

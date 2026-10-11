@@ -1,0 +1,26 @@
+{
+  "name": "@robucca/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Logika bisnis bersama (fungsi murni): harga, diskon, pajak, pembulatan, opsi menu, tanggal bisnis, nomor struk. Dipakai API, POS, dan PWA agar hasil hitung selalu sama.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "tsc -p tsconfig.json --noEmit false --outDir .test-dist && node --test .test-dist/*.test.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@robucca/tsconfig": "workspace:*",
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  }
+}

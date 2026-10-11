@@ -1,0 +1,53 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "ui": "stream",
+  "globalEnv": [
+    "NODE_ENV"
+  ],
+  "tasks": {
+    "db:generate": {
+      "inputs": [
+        "prisma/**",
+        "prisma.config.ts"
+      ],
+      "outputs": [
+        "src/generated/**"
+      ],
+      "cache": false
+    },
+    "build": {
+      "dependsOn": [
+        "^build",
+        "^db:generate",
+        "db:generate"
+      ],
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "!.next/cache/**"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^build",
+        "^db:generate",
+        "db:generate"
+      ]
+    },
+    "dev": {
+      "dependsOn": [
+        "^build",
+        "^db:generate"
+      ],
+      "cache": false,
+      "persistent": true
+    },
+    "test": {
+      "dependsOn": [
+        "^build",
+        "^db:generate"
+      ],
+      "outputs": []
+    }
+  }
+}
