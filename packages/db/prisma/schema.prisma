@@ -231,6 +231,9 @@ model Branch {
   maxReservationGuests Int      @default(30) @db.SmallInt
   /// Area duduk yang bisa dipilih saat reservasi, mis. ["Indoor", "Outdoor", "Smoking"].
   reservationAreas     String[]
+  /// Gambar QRIS statis merchant cabang (URL). Ditampilkan di aplikasi pelanggan untuk bayar QRIS / e-wallet;
+  /// kasir tetap mengonfirmasi pembayaran di POS (tanpa payment gateway, status tidak bisa ditandai lunas oleh pelanggan).
+  qrisImageUrl         String?  @db.VarChar(500)
   isActive             Boolean  @default(true)
   createdAt            DateTime @default(now()) @db.Timestamptz(3)
   updatedAt            DateTime @updatedAt @db.Timestamptz(3)

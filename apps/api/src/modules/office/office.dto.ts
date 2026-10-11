@@ -658,6 +658,8 @@ export class BranchDto {
   @IsOptional() @IsBoolean() acceptsReservations?: boolean;
   @IsOptional() @IsInt() @Min(1) @Max(500) maxReservationGuests?: number;
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @MaxLength(40, { each: true }) reservationAreas?: string[];
+  /** Gambar QRIS statis merchant (URL https:// atau path aset, mis. assets/img/qris-ijn.png). */
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsString() @MaxLength(500) qrisImageUrl?: string | null;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
@@ -685,6 +687,8 @@ export class UpdateBranchDto {
   @IsOptional() @IsBoolean() acceptsReservations?: boolean;
   @IsOptional() @IsInt() @Min(1) @Max(500) maxReservationGuests?: number;
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @MaxLength(40, { each: true }) reservationAreas?: string[];
+  /** Gambar QRIS statis merchant (URL https:// atau path aset, mis. assets/img/qris-ijn.png). */
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsString() @MaxLength(500) qrisImageUrl?: string | null;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 

@@ -11,6 +11,18 @@ interface Branch {
   id: string; code: string; name: string; address: string | null; phone: string | null; timezone: string; dayStartMinute: number; openTime: string | null; closeTime: string | null;
   taxLabel: string; taxRateBp: number; taxInclusive: boolean; serviceRateBp: number; taxOnService: boolean; receiptPaperMm: number; receiptFooter: string | null;
   acceptsPwa: boolean; acceptsDelivery: boolean; acceptsReservations: boolean; isActive: boolean; orderCount: number; deviceCount: number; staffCount: number; codeLocked: boolean;
+  latitude: number | null; longitude: number | null; deliveryMaxKm: number | null; maxReservationGuests: number; reservationAreas: string[]; qrisImageUrl: string | null;
+}
+
+/** "-7.979489, 112.6174187" (salin dari Google Maps) → [lat, lng]; kosong → null; tidak valid → undefined. */
+function parseLatLng(s: string): [number, number] | null | undefined {
+  const t = s.trim();
+  if (!t) return null;
+  const m = /^(-?\d{1,2}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)$/.exec(t);
+  if (!m) return undefined;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? [lat, lng] : undefined;
 }
 
 export default function BranchesPage() {
@@ -103,6 +115,8 @@ function BranchBody({ b0 }: { b0: Branch | null }) {
     openTime: b0?.openTime ?? '08:00', closeTime: b0?.closeTime ?? '21:00', taxLabel: b0?.taxLabel ?? 'PB1', taxPct: (b0?.taxRateBp ?? 1000) / 100, taxInclusive: b0?.taxInclusive ?? true,
     servicePct: (b0?.serviceRateBp ?? 0) / 100, taxOnService: b0?.taxOnService ?? true, receiptPaperMm: b0?.receiptPaperMm ?? 80, receiptFooter: b0?.receiptFooter ?? '',
     acceptsPwa: b0?.acceptsPwa ?? true, acceptsDelivery: b0?.acceptsDelivery ?? false, acceptsReservations: b0?.acceptsReservations ?? false, isActive: b0?.isActive ?? true,
+    latLng: b0?.latitude != null && b0.longitude != null ? `${b0.latitude}, ${b0.longitude}` : '', deliveryMaxKm: b0?.deliveryMaxKm != null ? String(b0.deliveryMaxKm) : '15',
+    maxReservationGuests: b0?.maxReservationGuests ?? 30, reservationAreas: (b0?.reservationAreas ?? ['Indoor', 'Outdoor']).join(', '), qrisImageUrl: b0?.qrisImageUrl ?? '',
   });
   const [err, setErr] = useState('');
   const s = settings();
@@ -118,11 +132,20 @@ function BranchBody({ b0 }: { b0: Branch | null }) {
     if (!b0 && !validBranchCode(code)) return setErr('Kode cabang 2–4 karakter, diawali huruf (mis. IJN, CB2).');
     if (!b.name.trim()) return setErr('Isi nama cabang.');
     if (!(b.taxPct >= 0 && b.taxPct <= 100 && b.servicePct >= 0 && b.servicePct <= 100)) return setErr('Tarif pajak/layanan harus 0–100%.');
+    const ll = parseLatLng(b.latLng);
+    if (ll === undefined) return setErr('Titik lokasi belum valid. Salin dari Google Maps, mis. -7.979489, 112.617418.');
+    if (b.acceptsDelivery && !ll) return setErr('Pesan antar butuh titik lokasi toko (untuk menghitung jarak & ongkir).');
+    const maxKm = b.deliveryMaxKm.trim() ? Number(b.deliveryMaxKm) : null;
+    if (maxKm != null && !(maxKm > 0 && maxKm <= 100)) return setErr('Jarak antar maksimal 0–100 km.');
+    if (!(b.maxReservationGuests >= 1 && b.maxReservationGuests <= 500)) return setErr('Maksimal tamu per reservasi 1–500 orang.');
+    const areas = [...new Set(b.reservationAreas.split(',').map((a) => a.trim()).filter(Boolean))].slice(0, 20);
     const body = {
       ...(b0 && b0.code === code ? {} : { code }), name: b.name.trim(), address: b.address.trim() || null, phone: b.phone.trim() || null, timezone: b.timezone, dayStartMinute: b.dayStartMinute,
       openTime: b.openTime || null, closeTime: b.closeTime || null, taxLabel: b.taxLabel.trim() || 'PB1', taxRateBp: Math.round(b.taxPct * 100), taxInclusive: b.taxInclusive,
       serviceRateBp: Math.round(b.servicePct * 100), taxOnService: b.taxOnService, receiptPaperMm: b.receiptPaperMm, receiptFooter: b.receiptFooter.trim() || null,
       acceptsPwa: b.acceptsPwa, acceptsDelivery: b.acceptsDelivery, acceptsReservations: b.acceptsReservations, isActive: b.isActive,
+      latitude: ll ? ll[0] : null, longitude: ll ? ll[1] : null, deliveryMaxKm: maxKm, maxReservationGuests: b.maxReservationGuests, reservationAreas: areas,
+      qrisImageUrl: b.qrisImageUrl.trim() || null,
     };
     try {
       await oc(b0 ? 'PATCH' : 'POST', b0 ? `/office/branches/${b0.id}` : '/office/branches', body);
@@ -262,6 +285,37 @@ function BranchBody({ b0 }: { b0: Branch | null }) {
         {sw('acceptsDelivery', 'Terima pesan antar')}
         {sw('acceptsReservations', 'Terima reservasi meja')}
         {sw('isActive', 'Cabang aktif', 'Cabang nonaktif tidak bisa dipakai berjualan')}
+      </div>
+      <div className="section-title">
+        <h3>Aplikasi pelanggan</h3>
+      </div>
+      <div className="form-grid">
+        <label className="field full">
+          <span>
+            Titik lokasi toko <em>(lat, lng dari Google Maps; dipakai untuk peta, rute, & ongkir)</em>
+          </span>
+          <input className="input" data-k="latLng" value={b.latLng} placeholder="-7.979489, 112.617418" inputMode="decimal" onChange={(e) => setB({ ...b, latLng: e.target.value })} />
+        </label>
+        <label className="field">
+          <span>Jarak antar maksimal (km)</span>
+          <input className="input" type="number" min={1} max={100} step={0.5} value={b.deliveryMaxKm} onChange={(e) => setB({ ...b, deliveryMaxKm: e.target.value })} />
+        </label>
+        <label className="field">
+          <span>Maks. tamu per reservasi</span>
+          <input className="input" type="number" min={1} max={500} value={b.maxReservationGuests} onChange={(e) => setB({ ...b, maxReservationGuests: Number(e.target.value) })} />
+        </label>
+        <label className="field full">
+          <span>
+            Area reservasi <em>(pisahkan dengan koma)</em>
+          </span>
+          <input className="input" value={b.reservationAreas} placeholder="Indoor, Outdoor" onChange={(e) => setB({ ...b, reservationAreas: e.target.value })} />
+        </label>
+        <label className="field full">
+          <span>
+            Gambar QRIS statis <em>(URL; pelanggan scan untuk bayar QRIS / e-wallet, kasir mengonfirmasi di POS)</em>
+          </span>
+          <input className="input" data-k="qris" value={b.qrisImageUrl} placeholder="https://… atau assets/img/qris-ijn.png" onChange={(e) => setB({ ...b, qrisImageUrl: e.target.value })} />
+        </label>
       </div>
       {err ? <p className="err-text">{err}</p> : null}
     </Drawer>

@@ -26,6 +26,7 @@ export class CatalogService {
     code: string; name: string; address: string | null; phone: string | null; timezone: string; openTime: string | null; closeTime: string | null;
     latitude: { toNumber(): number } | null; longitude: { toNumber(): number } | null; acceptsPwa: boolean; acceptsDelivery: boolean; deliveryMaxKm: { toNumber(): number } | null;
     acceptsReservations: boolean; maxReservationGuests: number; reservationAreas: string[]; taxLabel: string; taxRateBp: number; taxInclusive: boolean;
+    qrisImageUrl: string | null;
   }) {
     return {
       code: b.code, name: b.name, address: b.address, phone: b.phone, timezone: b.timezone, openTime: b.openTime, closeTime: b.closeTime,
@@ -33,6 +34,8 @@ export class CatalogService {
       acceptsPwa: b.acceptsPwa, acceptsDelivery: b.acceptsDelivery && b.latitude != null && b.longitude != null, deliveryMaxKm: num(b.deliveryMaxKm),
       acceptsReservations: b.acceptsReservations, maxReservationGuests: b.maxReservationGuests, reservationAreas: b.reservationAreas,
       taxLabel: b.taxLabel, taxRateBp: b.taxRateBp, taxInclusive: b.taxInclusive,
+      /** QRIS statis cabang untuk bayar QRIS / e-wallet (dikonfirmasi kasir). */
+      qrisImageUrl: b.qrisImageUrl,
     };
   }
 
