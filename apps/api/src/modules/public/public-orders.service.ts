@@ -48,10 +48,13 @@ export const PUBLIC_ORDER_SELECT = {
   reservation: { select: { id: true, code: true, reservedFor: true } },
   items: {
     where: { voidedAt: null },
+    // Urutan baris seperti di keranjang dan opsi seperti di menu (ID berurutan waktu saat disimpan), bukan urutan fisik database.
+    orderBy: { id: 'asc' },
     select: {
       id: true, productId: true, productName: true, quantity: true, unitPrice: true, lineTotal: true, note: true,
       product: { select: { imageUrl: true } },
       modifiers: {
+        orderBy: { id: 'asc' },
         select: {
           modifierOptionId: true,
           optionName: true,
@@ -197,11 +200,15 @@ export class PublicOrdersService {
 
   /** Pelanggan menandai pesanan sudah diambil/diterima (hanya setelah siap / diantar). */
   async received(id: string): Promise<PublicOrder> {
-    const o = await this.prisma.db.order.findUnique({ where: { id }, select: { branchId: true, fulfillment: true, status: true } });
+    const o = await this.prisma.db.order.findUnique({ where: { id }, select: { branchId: true, fulfillment: true, status: true, delivery: { select: { id: true } } } });
     if (!o) throw new NotFoundException('Pesanan tidak ditemukan');
     if (o.fulfillment === 'COMPLETED') return this.get(id);
     if (o.fulfillment !== 'READY' && o.fulfillment !== 'OUT_FOR_DELIVERY') throw new ConflictException('Pesanan belum siap');
-    await this.prisma.db.order.update({ where: { id }, data: { fulfillment: 'COMPLETED', completedAt: new Date() } });
+    const now = new Date();
+    await this.prisma.db.$transaction(async (tx) => {
+      await tx.order.update({ where: { id }, data: { fulfillment: 'COMPLETED', completedAt: now } });
+      if (o.delivery) await tx.delivery.update({ where: { orderId: id }, data: { status: 'DELIVERED', deliveredAt: now } });
+    });
     this.events.emit({ branchId: o.branchId, type: 'order', data: { id } });
     return this.get(id);
   }
@@ -335,7 +342,8 @@ export class PublicOrdersService {
       if (errs.length) throw new Reject(400, `${p.menu.name}: ${errs.join(', ')}`);
       const price = unitPrice(p.menu, sel);
       if (it.unitPrice != null && it.unitPrice !== price) throw new Reject(409, `Harga ${p.menu.name} sudah berubah. Muat ulang menu.`);
-      return { it, p, mods: chosenModifiers(p.menu, sel), price, id: uuidv7() };
+      // ID berurutan (milidetik berbeda per baris, begitu juga opsinya): urutan tersimpan sesuai keranjang & menu.
+      return { it, p, mods: chosenModifiers(p.menu, sel), price, id: uuidv7(now.getTime() + n) };
     });
 
     // --- Delivery: jarak & ongkir dihitung server
@@ -422,7 +430,9 @@ export class PublicOrdersService {
             note: l.it.note || null,
             station: l.p.station,
             sentToKitchenAt: sendToKitchen,
-            modifiers: { create: l.mods.map((m) => ({ modifierOptionId: m.optionId, groupName: m.groupName, optionName: m.optionName, priceDelta: m.priceDelta })) },
+            modifiers: {
+              create: l.mods.map((m, k) => ({ id: uuidv7(now.getTime() + k), modifierOptionId: m.optionId, groupName: m.groupName, optionName: m.optionName, priceDelta: m.priceDelta })),
+            },
           },
         });
       }

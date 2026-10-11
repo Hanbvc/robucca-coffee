@@ -601,6 +601,13 @@ input, select, textarea { font: inherit; color: inherit; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 13px; }
 .kv dt { color: var(--ink-3); }
 .kv dd { margin: 0; font-weight: 600; text-align: right; }
+/* Delivery dari aplikasi pelanggan (detail transaksi) */
+.dlv { background: var(--panel-2); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+.dlv .kv { grid-template-columns: 74px 1fr; }
+.dlv .kv dd { text-align: left; font-weight: 500; overflow-wrap: anywhere; }
+.dlv a, .dlv .link { color: var(--green); font-weight: 600; text-decoration: none; }
+.dlv .link { padding: 0; background: none; border: 0; font: inherit; font-weight: 600; cursor: pointer; }
+.dlv-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; }
 .opt-editor { border: 1.5px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; background: #fff; }
 .opt-editor .oe-head { display: flex; gap: 8px; align-items: center; }
 .choice-row { display: grid; grid-template-columns: 1fr 120px 32px; gap: 6px; }

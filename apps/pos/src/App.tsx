@@ -144,9 +144,11 @@ function Rail({ active }: { active: ViewName }) {
   const b = be.branch;
   useBusTick(['net', 'sync', 'master', 'app']);
   const [bills, setBills] = useState(0);
+  const [deliv, setDeliv] = useState(0);
   const [pending, setPending] = useState(0);
   const refresh = () => {
     if (b) void be.openOrders().then((l) => setBills(l.length));
+    if (b) void be.deliveriesWaiting().then(setDeliv);
     if (be.isServer) void be.syncState().then((s) => setPending(s.pending));
   };
   useEffect(refresh, []);
@@ -164,12 +166,17 @@ function Rail({ active }: { active: ViewName }) {
         <img src="assets/brand/wordmark-light.png" alt="Robucca" />
       </div>
       {items.map(([r, ic, label]) => (
-        <a key={r} href={`#/${r}`} className={active === r ? 'on' : ''} data-r={r}>
+        <a key={r} href={r === 'riwayat' && deliv > 0 ? '#/riwayat?f=delivery' : `#/${r}`} className={active === r ? 'on' : ''} data-r={r}>
           <Icon name={ic} />
           <span>{label}</span>
           {r === 'tagihan' && bills > 0 && (
             <i className="badge" data-badge="bills">
               {bills}
+            </i>
+          )}
+          {r === 'riwayat' && deliv > 0 && (
+            <i className="badge" data-badge="delivery" title="Delivery menunggu driver">
+              {deliv}
             </i>
           )}
         </a>

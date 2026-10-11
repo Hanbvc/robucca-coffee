@@ -158,6 +158,26 @@ export interface FeedOrder {
   items: FeedItem[];
   payments: { id: string; method: PaymentMethod; provider: string | null; amount: number; tenderedAmount: number | null; changeAmount: number | null; reference: string | null; paidAt: string | null; paymentOptionId: string | null }[];
   refund: { amount: number; reason: string; createdAt: string } | null;
+  /** Desimal Prisma tiba sebagai string JSON. */
+  delivery?: {
+    status: string;
+    recipientName: string;
+    recipientPhone: string;
+    addressText: string;
+    addressNote: string | null;
+    latitude: string | number;
+    longitude: string | number;
+    distanceKm: string | number;
+    fee: number;
+    driverName: string | null;
+    driverPhone: string | null;
+    vehiclePlate: string | null;
+    trackingUrl: string | null;
+    estimatedAt: string | null;
+    pickedUpAt: string | null;
+    deliveredAt: string | null;
+    courier: { name: string };
+  } | null;
 }
 
 const ms = (s: string | null | undefined): number | null => (s ? Date.parse(s) : null);
@@ -265,6 +285,27 @@ export function fromServerOrder(row: FeedOrder, master: Master, branchId: string
     },
     markupBp: row.channelMarkupBp,
     deliveryFee: row.deliveryFee,
+    delivery: row.delivery
+      ? {
+          status: row.delivery.status,
+          recipientName: row.delivery.recipientName,
+          recipientPhone: row.delivery.recipientPhone,
+          addressText: row.delivery.addressText,
+          addressNote: row.delivery.addressNote ?? '',
+          lat: Number(row.delivery.latitude),
+          lng: Number(row.delivery.longitude),
+          distanceKm: Number(row.delivery.distanceKm),
+          fee: row.delivery.fee,
+          courierName: row.delivery.courier.name,
+          driverName: row.delivery.driverName ?? '',
+          driverPhone: row.delivery.driverPhone ?? '',
+          vehiclePlate: row.delivery.vehiclePlate ?? '',
+          trackingUrl: row.delivery.trackingUrl ?? '',
+          estimatedAt: ms(row.delivery.estimatedAt),
+          pickedUpAt: ms(row.delivery.pickedUpAt),
+          deliveredAt: ms(row.delivery.deliveredAt),
+        }
+      : null,
     totals,
     payments,
     change,

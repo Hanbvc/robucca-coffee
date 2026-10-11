@@ -2,18 +2,20 @@
    Port dari pos/js/views/history.js. */
 import { addDays, clock, rp } from '@robucca/core';
 import { useEffect, useState } from 'react';
+import { DeliveryTag, needsDriver } from '../components/Delivery';
 import { OrderActions, OrderDetail, StatusTag } from '../components/OrderDetail';
 import type { Order } from '../data/types';
 import { useBus } from '../lib/bus';
 import { Icon } from '../lib/icons';
-import { S, branch, today } from '../state';
+import { S, branch, today, useRoute } from '../state';
 
-type Filter = '' | 'PAID' | 'OPEN' | 'VOIDED' | 'REFUNDED';
+type Filter = '' | 'PAID' | 'OPEN' | 'VOIDED' | 'REFUNDED' | 'DELIVERY';
 
 export function HistoryView() {
   const b = branch();
   const [day, setDay] = useState(today());
-  const [filter, setFilter] = useState<Filter>('');
+  const { query } = useRoute();
+  const [filter, setFilter] = useState<Filter>(query.f === 'delivery' ? 'DELIVERY' : '');
   const [q, setQ] = useState('');
   const [sel, setSel] = useState<string | null>(null);
   const [rows, setRows] = useState<Order[]>([]);
@@ -22,15 +24,21 @@ export function HistoryView() {
     void S.be.ordersOf(day, day).then((r) => setRows(r.filter((o) => o.status !== 'DRAFT').sort((a, x) => (x.paidAt || x.createdAt) - (a.paidAt || a.createdAt))));
   useEffect(load, [day]);
   useBus(['orders'], load);
+  // Lencana Riwayat di rail (delivery menunggu driver) membuka saringan Delivery.
+  useEffect(() => {
+    if (query.f === 'delivery') setFilter('DELIVERY');
+  }, [query.f]);
 
   let list = rows;
   if (filter === 'OPEN') list = list.filter((o) => o.status === 'OPEN' || o.status === 'AWAITING_PAYMENT');
+  else if (filter === 'DELIVERY') list = list.filter((o) => o.type === 'DELIVERY');
   else if (filter) list = list.filter((o) => o.status === filter);
   const s = q.trim().toLowerCase();
   if (s) list = list.filter((o) => [o.number, o.queueNo, o.table, o.customerName, o.cashierName].some((x) => String(x || '').toLowerCase().includes(s)));
   const paid = rows.filter((o) => o.status === 'PAID' || o.status === 'REFUNDED');
   const total = paid.reduce((a, o) => a + o.totals.total - (o.refund?.amount ?? 0), 0);
   const cur = rows.find((x) => x.id === sel);
+  const waiting = rows.filter(needsDriver).length;
 
   const days: [string, string][] = [
     [today(), 'Hari ini'],
@@ -42,6 +50,7 @@ export function HistoryView() {
     ['OPEN', 'Belum bayar'],
     ['VOIDED', 'Void'],
     ['REFUNDED', 'Refund'],
+    ['DELIVERY', waiting ? `Delivery · ${waiting}` : 'Delivery'],
   ];
   return (
     <>
@@ -103,7 +112,7 @@ export function HistoryView() {
                     <span className="lq">{o.queueNo || '—'}</span>
                     <div>
                       <b>
-                        {o.number} <StatusTag o={o} />
+                        {o.number} <StatusTag o={o} /> <DeliveryTag o={o} />
                         {o.syncError && <span className="tag red">Ditolak server</span>}
                       </b>
                       <small>

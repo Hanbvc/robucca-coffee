@@ -1,4 +1,4 @@
-/* Detail transaksi + aksi (cetak ulang, WhatsApp, tiket dapur, void, refund) — dipakai Riwayat (dan Kantor nanti).
+/* Detail transaksi + aksi (cetak ulang, WhatsApp, tiket dapur, void, refund, driver delivery) — dipakai Riwayat (dan Kantor nanti).
    Port dari pos/js/components/orderDetail.js. */
 import { dateTime, rp } from '@robucca/core';
 import type { Order } from '../data/types';
@@ -7,6 +7,7 @@ import { refundOrder, voidOrder } from '../ops';
 import { S, branch, settings } from '../state';
 import { confirmBox, promptBox, toast } from '../ui/overlay';
 import { requireApproval } from './approve';
+import { DeliveryInfo, DeliveryTag, deliveryStage, dispatchDialog } from './Delivery';
 import { printHTML, printReceipt, receiptHTML, receiptText, ticketHTML } from './receipt';
 
 export const STATUS: Record<string, [string, string]> = {
@@ -44,6 +45,7 @@ export function OrderDetail({ o }: { o: Order }) {
         <StatusTag o={o} />
         <span className="tag">{o.channelName}</span>
         {o.source === 'PWA' && <span className="tag blue">Aplikasi</span>}
+        <DeliveryTag o={o} />
         <span className="tag">{b.name}</span>
         <span className="tag">T{o.terminalNo ?? '-'}</span>
         {o.demo && <span className="tag amber">Data contoh</span>}
@@ -58,6 +60,7 @@ export function OrderDetail({ o }: { o: Order }) {
           </div>
         </div>
       )}
+      <DeliveryInfo o={o} />
       <div className="receipt" dangerouslySetInnerHTML={{ __html: receiptHTML(o, { branch: b, settings: settings() }) }} />
     </>
   );
@@ -114,6 +117,23 @@ export async function runAction(act: string, o: Order): Promise<boolean> {
     toast(`Refund ${rp(o.totals.total)} dicatat`, 'warn');
     return true;
   }
+  if (act === 'dispatch') {
+    const again = o.fulfillment === 'OUT_FOR_DELIVERY';
+    if (!(await dispatchDialog(o))) return false;
+    toast(again ? 'Data driver diperbarui' : 'Driver berangkat · pelanggan melihat "Sedang diantar"');
+    return true;
+  }
+  if (act === 'delivered') {
+    const ok = await confirmBox({
+      title: 'Pesanan sudah tiba?',
+      text: `${o.number} · ${o.delivery?.recipientName ?? ''}. Status di aplikasi pelanggan menjadi selesai.`,
+      ok: 'Ya, sudah tiba',
+    });
+    if (!ok) return false;
+    await S.be.delivered(o);
+    toast('Pesanan delivery selesai');
+    return true;
+  }
   return false;
 }
 
@@ -125,8 +145,19 @@ export function OrderActions({ o, after }: { o: Order; after: () => void }) {
       toast((err as Error).message || 'Gagal', 'err');
     }
   };
+  const dlv = deliveryStage(o);
   return (
     <div className="row wrap" style={{ marginTop: 14, gap: 8 }}>
+      {(dlv === 'prep' || dlv === 'ready' || dlv === 'out') && (
+        <button className={`btn ${dlv === 'out' ? 'ghost' : ''}`} data-od="dispatch" onClick={() => void run('dispatch')}>
+          <Icon name="scooter" size="sm" /> {dlv === 'out' ? 'Ubah data driver' : 'Driver berangkat'}
+        </button>
+      )}
+      {(dlv === 'ready' || dlv === 'out') && (
+        <button className={`btn ${dlv === 'out' ? '' : 'ghost'}`} data-od="delivered" onClick={() => void run('delivered')}>
+          <Icon name="check-circle" size="sm" /> Pesanan tiba
+        </button>
+      )}
       <button className="btn ghost" data-od="print" onClick={() => void run('print')}>
         <Icon name="printer" size="sm" /> Cetak ulang
       </button>

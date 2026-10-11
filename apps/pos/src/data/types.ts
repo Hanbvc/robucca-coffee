@@ -210,6 +210,28 @@ export interface Pay {
 
 export type OrderStatus = 'DRAFT' | 'OPEN' | 'AWAITING_PAYMENT' | 'PAID' | 'VOIDED' | 'REFUNDED';
 
+/** Pengantaran pesanan Delivery dari aplikasi pelanggan (kurir dipesan kasir lewat aplikasi GoSend/GrabExpress). */
+export interface OrderDelivery {
+  /** SEARCHING_DRIVER | DRIVER_ASSIGNED | PICKED_UP | DELIVERED | CANCELLED */
+  status: string;
+  recipientName: string;
+  recipientPhone: string;
+  addressText: string;
+  addressNote: string;
+  lat: number;
+  lng: number;
+  distanceKm: number;
+  fee: number;
+  courierName: string;
+  driverName: string;
+  driverPhone: string;
+  vehiclePlate: string;
+  trackingUrl: string;
+  estimatedAt: number | null;
+  pickedUpAt: number | null;
+  deliveredAt: number | null;
+}
+
 export interface Order {
   id: string;
   number: string;
@@ -236,6 +258,8 @@ export interface Order {
   cfg: TaxConfig;
   markupBp: number;
   deliveryFee: number;
+  /** hanya pesanan Delivery dari aplikasi pelanggan */
+  delivery?: OrderDelivery | null;
   totals: OrderTotals;
   payments: Pay[];
   change: number;

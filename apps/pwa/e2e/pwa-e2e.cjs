@@ -296,6 +296,52 @@ async function startPwaServer() {
     log('delivery: ongkir|km|ongkir pesanan|milik akun =', dl);
     if (!/^\d+\|[\d.]+\|\d+\|true$/.test(dl)) throw new Error('data delivery: ' + dl);
 
+    // 5b. Kasir: konfirmasi bayar → dapur selesai → driver berangkat (data driver dari aplikasi kurir) → pelanggan
+    //     melihat "Sedang diantar" + driver tanpa memuat ulang → kasir menandai tiba
+    await posPayBill(pos, o3, sql(`select "customerName" from "Order" where id='${o3}'`));
+    await toastIs(page, 'Pembayaran diterima kasir', 30000);
+    await posBump(pos, o3);
+    await page.waitForSelector('#st-title:has-text("Menunggu driver")', { timeout: 30000 });
+    await pos.bringToFront(); // halaman di belakang tidak menjalankan animasi → tangkapan layar modal setengah jadi
+    await pos.goto(POS.replace('?nosw', '?nosw#/kasir'));
+    await pos.waitForSelector('.rail [data-badge="delivery"]', { timeout: 20000 });
+    await pos.click('.rail a[data-r="riwayat"]');
+    await pos.waitForSelector('#h-f button.on[data-f="DELIVERY"]');
+    await pos.click(`[data-o="${o3}"]`);
+    await pos.waitForSelector('#od-delivery:has-text("Ruko lantai 2")');
+    await pos.waitForFunction(() => !document.querySelector('.toasts')?.childElementCount, null, { timeout: 8000 }).catch(() => {});
+    await pos.click('[data-od="dispatch"]');
+    const dm = pos.locator('.modal').last();
+    await dm.locator('#dp-name').fill('Rudi Hartono');
+    await dm.locator('#dp-phone').fill('0813 3344 5566');
+    await dm.locator('#dp-plate').fill('n 4821 kx');
+    await dm.locator('#dp-url').fill('https://gosend.example/lacak/E2E123');
+    await dm.locator('#dp-eta').fill('18');
+    await wait(400);
+    await pos.screenshot({ path: `${SHOTS}/14b-kasir-driver-berangkat.png` });
+    await dm.locator('[data-ok]').click();
+    await pos.waitForSelector('#od-delivery [data-driver]:has-text("N 4821 KX")', { timeout: 15000 });
+    await page.bringToFront();
+    await page.waitForSelector('#st-title:has-text("Sedang diantar")', { timeout: 30000 });
+    const card = await page.locator('.card.driver').innerText();
+    if (!/Rudi Hartono/.test(card) || !/N 4821 KX/.test(card)) throw new Error('kartu driver: ' + card);
+    if ((await page.locator('.card.driver a[aria-label="Lacak driver"]').getAttribute('href')) !== 'https://gosend.example/lacak/E2E123') throw new Error('tautan lacak');
+    if (!/Perkiraan tiba \d{2}[.:]\d{2}/.test(await page.locator('.track-hero p').innerText())) throw new Error('perkiraan tiba tidak tampil');
+    await settle(page);
+    await shot(page, '14c-sedang-diantar.png', true);
+    await pos.waitForFunction(() => !document.querySelector('.toasts')?.childElementCount, null, { timeout: 8000 }).catch(() => {});
+    await pos.setViewportSize({ width: 1366, height: 1180 }); // detail transaksi utuh: panel delivery sampai tombol
+    await pos.evaluate(() => document.getElementById('view')?.scrollTo(0, 0));
+    await wait(300);
+    await pos.screenshot({ path: `${SHOTS}/14d-kasir-sedang-diantar.png` });
+    await pos.setViewportSize({ width: 1366, height: 860 });
+    await pos.click('[data-od="delivered"]');
+    await pos.locator('.modal').last().locator('button', { hasText: 'Ya, sudah tiba' }).click();
+    await page.waitForSelector('#st-title:has-text("Pesanan tiba")', { timeout: 30000 });
+    const dd = sql(`select o.fulfillment||'|'||d.status||'|'||d."driverName"||'|'||d."driverPhone"||'|'||d."vehiclePlate" from "Order" o join "Delivery" d on d."orderId"=o.id where o.id='${o3}'`);
+    if (dd !== 'COMPLETED|DELIVERED|Rudi Hartono|6281333445566|N 4821 KX') throw new Error('pengantaran di server: ' + dd);
+    log('delivery: kasir memberangkatkan driver → pelanggan melihat driver & tautan lacak → tiba');
+
     // 6. Alamat tersimpan di akun (tersimpan otomatis saat delivery), lalu hapus
     await goTab(page, 'Akun');
     await page.locator('.ml', { hasText: 'Alamat tersimpan' }).click();

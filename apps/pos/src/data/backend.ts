@@ -20,6 +20,17 @@ const SYNC_EVERY = 15000;
 const KEEP_DAYS = 14;
 /** Pesan bila persetujuan manajer diminta saat offline (PIN penyetuju hanya diperiksa server). */
 export const APPROVAL_NEEDS_NET = 'Butuh koneksi untuk persetujuan manajer';
+const DELIVERY_NEEDS_NET = 'Status pengantaran butuh koneksi ke server. Periksa koneksi lalu coba lagi.';
+
+/** Driver yang mengambil pesanan delivery (dari aplikasi GoSend/GrabExpress atau kurir cabang). */
+export interface DispatchInput {
+  driverName: string;
+  driverPhone?: string;
+  vehiclePlate?: string;
+  trackingUrl?: string;
+  /** perkiraan tiba, menit dari sekarang */
+  etaMinutes?: number;
+}
 
 export interface Approval {
   staff: MStaff;
@@ -431,6 +442,16 @@ export class Backend {
     const bid = this.device?.branchId;
     return (await db.all<Order>('orders')).filter((o) => o.branchId === bid && (o.status === 'OPEN' || o.status === 'AWAITING_PAYMENT'));
   }
+  /** Delivery lunas yang belum diberangkatkan, hari ini & kemarin seperti di Riwayat (lencana di rail). */
+  async deliveriesWaiting(): Promise<number> {
+    const bid = this.device?.branchId;
+    const from = addDays(this.today(), -1);
+    return (await db.all<Order>('orders')).filter(
+      (o) =>
+        o.branchId === bid && o.bizDate >= from && o.status === 'PAID' && !!o.delivery && o.delivery.status !== 'DELIVERED' &&
+        !['OUT_FOR_DELIVERY', 'COMPLETED', 'CANCELLED'].includes(o.fulfillment ?? ''),
+    ).length;
+  }
   async kitchenMarks(sinceMs: number): Promise<KitchenMark[]> {
     return (await db.all<KitchenMark>('kitchen')).filter((k) => k.at >= sinceMs || !k.done);
   }
@@ -482,6 +503,38 @@ export class Backend {
     bus.emit('orders', { ids: [o.id] });
     if (this.isServer) this.kick();
     return next;
+  }
+
+  /** Delivery: driver berangkat (atau data driver dibetulkan). Online saja: pelanggan melihatnya seketika. */
+  dispatch(o: Order, driver: DispatchInput): Promise<Order> {
+    return this.deliveryStep(o, 'dispatch', driver);
+  }
+
+  /** Delivery: pesanan tiba di pelanggan. */
+  delivered(o: Order): Promise<Order> {
+    return this.deliveryStep(o, 'delivered', {});
+  }
+
+  private async deliveryStep(o: Order, step: 'dispatch' | 'delivered', body: object, retried = false): Promise<Order> {
+    if (!this.isServer || !this.api || !o.delivery) throw new Error('Hanya untuk pesanan delivery dari aplikasi pelanggan');
+    if (await db.pending(`orders:${o.id}`)) await this.syncOnce();
+    if (await db.pending(`orders:${o.id}`)) throw new Error('Pesanan ini belum terkirim ke server. Coba lagi saat online.');
+    if (!(await this.ensureSession())) throw new Error(DELIVERY_NEEDS_NET);
+    let row: FeedOrder;
+    try {
+      row = await this.api.post<FeedOrder>(`/orders/${o.id}/${step}`, body, { session: true });
+    } catch (e) {
+      if (isOffline(e)) throw new Error(DELIVERY_NEEDS_NET);
+      if (e instanceof ApiError && e.status === 401 && !retried) {
+        // Sesi server kedaluwarsa: buat ulang dari PIN staf yang login lalu coba sekali lagi.
+        this.api.session = null;
+        if (await this.ensureSession()) return this.deliveryStep(o, step, body, true);
+      }
+      throw e;
+    }
+    await this.mergeOrders([row]);
+    bus.emit('orders', { ids: [o.id] });
+    return (await db.get<Order>('orders', o.id)) ?? o;
   }
 
   /* =========================================================

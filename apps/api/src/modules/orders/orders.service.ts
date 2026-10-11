@@ -1,4 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { deliveryEtaMinutes, normalizePhone } from '@robucca/core';
+import type { Prisma } from '@robucca/db';
 import { AuthService, can, canBranch, type DeviceCtx, type StaffCtx } from '../../common/auth';
 import { verify } from '../../common/tokens';
 import { SERVER_VERSION_STEP } from '../../common/versions';
@@ -7,6 +9,7 @@ import { AuditService } from '../audit/audit.service';
 import { EventsService } from '../events/events.service';
 import { ORDER_FEED_SELECT } from '../pos/pos.service';
 import { StockService } from '../stock/stock.service';
+import type { DispatchDto } from './orders.dto';
 
 @Injectable()
 export class OrdersService {
@@ -68,5 +71,80 @@ export class OrdersService {
     });
     this.events.emit({ branchId: result.branchId, type: 'feed', data: { at: Date.now() } });
     return result.refund;
+  }
+
+  /**
+   * Delivery berangkat: kasir mencatat driver yang mengambil pesanan (dari aplikasi GoSend/GrabExpress atau kurir cabang).
+   * Pelanggan langsung melihat "Sedang diantar" beserta nama, plat, nomor, perkiraan tiba, dan tautan lacak.
+   * Boleh dikirim ulang untuk membetulkan data driver. Versi naik SERVER_VERSION_STEP: salinan lama di perangkat kasir
+   * tidak bisa mengembalikan status pesanan.
+   */
+  async dispatch(id: string, body: DispatchDto, staff: StaffCtx, device: DeviceCtx | undefined) {
+    const driverPhone = body.driverPhone ? normalizePhone(body.driverPhone) : null;
+    if (body.driverPhone && !driverPhone) throw new BadRequestException('Nomor driver belum valid');
+    const now = new Date();
+    const branchId = await this.prisma.db.$transaction(async (tx) => {
+      const o = await this.deliveryOrder(tx, id, staff, device);
+      if (o.fulfillment === 'COMPLETED' || o.fulfillment === 'CANCELLED') throw new ConflictException('Pesanan ini sudah selesai');
+      const again = o.fulfillment === 'OUT_FOR_DELIVERY';
+      const eta = body.etaMinutes ?? (again ? null : deliveryEtaMinutes(o.delivery.distanceKm.toNumber(), 0));
+      const moved = await tx.order.updateMany({
+        where: { id: o.id, status: 'PAID', fulfillment: o.fulfillment },
+        data: { fulfillment: 'OUT_FOR_DELIVERY', version: { increment: SERVER_VERSION_STEP } },
+      });
+      if (!moved.count) throw new ConflictException('Status pesanan baru saja berubah. Coba lagi.');
+      await tx.delivery.update({
+        where: { orderId: o.id },
+        data: {
+          status: 'PICKED_UP',
+          driverName: body.driverName,
+          driverPhone,
+          vehiclePlate: body.vehiclePlate?.toUpperCase() ?? null,
+          trackingUrl: body.trackingUrl ?? null,
+          ...(eta != null ? { estimatedAt: new Date(now.getTime() + eta * 60_000) } : {}),
+          ...(again ? {} : { pickedUpAt: now }),
+        },
+      });
+      await this.audit.log({
+        action: again ? 'delivery.driver_update' : 'delivery.dispatch', entity: 'Order', entityId: o.id, branchId: o.branchId, actorId: staff.id,
+        detail: { number: o.number, driverName: body.driverName, vehiclePlate: body.vehiclePlate ?? null },
+      }, tx);
+      return o.branchId;
+    });
+    this.events.emit({ branchId, type: 'order', data: { id } });
+    return this.get(id, staff);
+  }
+
+  /** Delivery tiba di pelanggan (kabar dari driver / aplikasi kurir). Pelanggan juga bisa menandainya sendiri di aplikasi. */
+  async delivered(id: string, staff: StaffCtx, device: DeviceCtx | undefined) {
+    const now = new Date();
+    const branchId = await this.prisma.db.$transaction(async (tx) => {
+      const o = await this.deliveryOrder(tx, id, staff, device);
+      if (o.fulfillment === 'COMPLETED') return null;
+      if (o.fulfillment !== 'READY' && o.fulfillment !== 'OUT_FOR_DELIVERY') throw new ConflictException('Pesanan belum siap diantar');
+      const moved = await tx.order.updateMany({
+        where: { id: o.id, status: 'PAID', fulfillment: o.fulfillment },
+        data: { fulfillment: 'COMPLETED', completedAt: now, version: { increment: SERVER_VERSION_STEP } },
+      });
+      if (!moved.count) throw new ConflictException('Status pesanan baru saja berubah. Coba lagi.');
+      await tx.delivery.update({ where: { orderId: o.id }, data: { status: 'DELIVERED', deliveredAt: now } });
+      await this.audit.log({ action: 'delivery.delivered', entity: 'Order', entityId: o.id, branchId: o.branchId, actorId: staff.id, detail: { number: o.number } }, tx);
+      return o.branchId;
+    });
+    if (branchId) this.events.emit({ branchId, type: 'order', data: { id } });
+    return this.get(id, staff);
+  }
+
+  /** Pesanan delivery lunas di cabang staf (dan perangkat) ini. */
+  private async deliveryOrder(tx: Prisma.TransactionClient, id: string, staff: StaffCtx, device: DeviceCtx | undefined) {
+    const o = await tx.order.findUnique({
+      where: { id },
+      select: { id: true, branchId: true, number: true, type: true, status: true, fulfillment: true, delivery: { select: { distanceKm: true } } },
+    });
+    if (!o || !canBranch(staff, o.branchId)) throw new NotFoundException('Pesanan tidak ditemukan');
+    if (device?.branchId && device.branchId !== o.branchId) throw new BadRequestException('Pesanan ini milik cabang lain');
+    if (o.type !== 'DELIVERY' || !o.delivery) throw new BadRequestException('Bukan pesanan delivery');
+    if (o.status !== 'PAID') throw new ConflictException(o.status === 'OPEN' ? 'Pesanan delivery ini belum dibayar' : 'Pesanan ini sudah dibatalkan atau di-refund');
+    return { ...o, delivery: o.delivery };
   }
 }

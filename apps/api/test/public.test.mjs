@@ -345,6 +345,7 @@ test('bayar di kasir: kasir menyelesaikan pesanan Pick Up dengan tunai lewat /po
   assert.equal(pay.changeAmount, 100000 - 73000);
 });
 
+let deliv; let delivToken;
 test('delivery: ongkir & jarak dihitung server, di luar jangkauan ditolak, alamat tersimpan, total + ongkir lewat /pos/sync', { skip }, async () => {
   const t = await login(7, 'Dinda');
   const body = {
@@ -381,6 +382,141 @@ test('delivery: ongkir & jarak dihitung server, di luar jangkauan ditolak, alama
   const saved = await db.order.findUnique({ where: { id: o.id } });
   assert.equal(saved.total, 45500);
   assert.equal(saved.deliveryFee, 18500);
+  deliv = o; delivToken = r.body.accessToken;
+});
+
+/** Status pesanan pelanggan lewat SSE sampai `until` terpenuhi (maks. 5 detik). */
+async function watchStatus(id, tok, until) {
+  const ctrl = new AbortController();
+  const sse = await fetch(`${base}/public/orders/${id}/stream?token=${encodeURIComponent(tok)}`, { signal: ctrl.signal });
+  assert.equal(sse.status, 200);
+  const reader = sse.body.getReader();
+  const statuses = [];
+  const got = (async () => {
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buf += new TextDecoder().decode(value);
+      for (const m of buf.matchAll(/event: status\n(?:id: .*\n)?data: (.+)\n/g)) statuses.push(JSON.parse(m[1]));
+      buf = buf.slice(buf.lastIndexOf('\n\n') + 2);
+      if (statuses.some(until)) return;
+    }
+  })();
+  await new Promise((r) => setTimeout(r, 300)); // status awal terkirim dulu
+  const wait = () => Promise.race([got, new Promise((_, rej) => setTimeout(() => rej(new Error('status SSE tidak berubah')), 5000))]).finally(() => ctrl.abort());
+  return { statuses, wait };
+}
+
+test('delivery: kasir mencatat driver → pelanggan melihat "sedang diantar" (SSE), data driver bisa dibetulkan, lalu tiba', { skip }, async () => {
+  const dev = { 'x-device-token': device };
+  const ses = { ...dev, 'x-session': (await call('POST', '/pos/login', { userId: sari.id, pin: '3333' }, dev)).body.session };
+  const dapur = await db.user.findFirst({ where: { name: 'Dapur IJN' } });
+  const kds = { ...dev, 'x-session': (await call('POST', '/pos/login', { userId: dapur.id, pin: '4444' }, dev)).body.session };
+  const id = deliv.id;
+  const driver = { driverName: 'Budi Santoso', driverPhone: '0813-3344-5566', vehiclePlate: 'n 1234 abc', trackingUrl: 'https://gosend.example/track/ABC123', etaMinutes: 20 };
+
+  // Hak & masukan
+  assert.equal((await call('POST', `/orders/${id}/dispatch`, driver, dev)).status, 401, 'tanpa sesi staf');
+  assert.equal((await call('POST', `/orders/${id}/dispatch`, driver, kds)).status, 403, 'staf dapur tidak berjualan');
+  assert.equal((await call('POST', `/orders/${id}/dispatch`, { ...driver, trackingUrl: 'javascript:alert(1)' }, ses)).status, 400);
+  assert.equal((await call('POST', `/orders/${id}/dispatch`, { ...driver, driverPhone: '12345' }, ses)).status, 400);
+  assert.equal((await call('POST', `/orders/${pickup.order.id}/dispatch`, driver, ses)).status, 400, 'bukan pesanan delivery');
+  assert.equal((await call('POST', `/orders/${id}/delivered`, null, ses)).status, 409, 'belum siap diantar');
+
+  // Berangkat: pelanggan langsung melihat driver
+  const before = await db.order.findUnique({ where: { id } });
+  const w = await watchStatus(id, delivToken, (s) => s.stage === 'on_delivery');
+  const t0 = Date.now();
+  const r = await call('POST', `/orders/${id}/dispatch`, driver, ses);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.fulfillment, 'OUT_FOR_DELIVERY');
+  assert.equal(r.body.delivery.driverName, 'Budi Santoso');
+  assert.equal(r.body.delivery.courier.name, 'GoSend Instant');
+  await w.wait();
+  const seen = w.statuses.at(-1);
+  assert.equal(seen.stage, 'on_delivery');
+  assert.equal(seen.delivery.driverName, 'Budi Santoso');
+  assert.equal(seen.delivery.driverPhone, '6281333445566');
+  assert.equal(seen.delivery.vehiclePlate, 'N 1234 ABC');
+  assert.equal(seen.delivery.trackingUrl, 'https://gosend.example/track/ABC123');
+  const eta = Date.parse(seen.delivery.estimatedAt) - t0;
+  assert.ok(eta > 19 * 60e3 && eta < 21 * 60e3, `perkiraan tiba ±20 menit (${eta})`);
+  const after1 = await db.order.findUnique({ where: { id }, include: { delivery: true } });
+  assert.ok(after1.version >= before.version + 1000, 'versi melompat');
+  assert.equal(after1.delivery.status, 'PICKED_UP');
+  assert.ok(after1.delivery.pickedUpAt);
+
+  // Feed POS membawa data pengantaran; salinan perangkat versi lama = konflik (status tidak bisa dikembalikan)
+  const f = (await call('GET', '/pos/feed', null, dev)).body.orders.find((x) => x.id === id);
+  assert.equal(f.fulfillment, 'OUT_FOR_DELIVERY');
+  assert.equal(f.delivery.recipientPhone, deliv.customerPhone);
+  assert.equal(Number(f.delivery.distanceKm), 5.4);
+  assert.equal(f.delivery.addressNote, 'Ruko lantai 2');
+  const stale = await call('POST', '/pos/sync', { orders: [{
+    id: f.id, number: f.number, queueNumber: f.queueNumber, type: f.type, status: 'PAID', fulfillment: 'READY', createdAt: f.createdAt, paidAt: f.paidAt,
+    cashierId: sari.id, shiftId: shift, version: before.version + 1,
+    items: f.items.map((i) => ({ id: i.id, productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, optionIds: [] })),
+    payments: [{ id: randomUUID(), optionCode: 'gopay', amount: f.total, at: f.paidAt }],
+  }] }, dev);
+  assert.equal(stale.body.orders[0].status, 'conflict');
+
+  // Layar dapur menandai item belakangan: status tetap "sedang diantar"
+  await call('POST', '/pos/sync', { kitchen: [{ orderId: id, done: false, at: new Date().toISOString() }] }, dev);
+  await call('POST', '/pos/sync', { kitchen: [{ orderId: id, done: true, at: new Date().toISOString() }] }, dev);
+  assert.equal((await db.order.findUnique({ where: { id } })).fulfillment, 'OUT_FOR_DELIVERY');
+
+  // Data driver dibetulkan: jam berangkat & perkiraan tiba tetap, kolom kosong dihapus
+  const fix = await call('POST', `/orders/${id}/dispatch`, { driverName: 'Budi Santoso', driverPhone: '', vehiclePlate: 'N 1243 ABC' }, ses);
+  assert.equal(fix.status, 200, JSON.stringify(fix.body));
+  const after2 = await db.order.findUnique({ where: { id }, include: { delivery: true } });
+  assert.equal(after2.delivery.vehiclePlate, 'N 1243 ABC');
+  assert.equal(after2.delivery.driverPhone, null);
+  assert.equal(after2.delivery.trackingUrl, null);
+  assert.equal(after2.delivery.pickedUpAt.getTime(), after1.delivery.pickedUpAt.getTime());
+  assert.equal(after2.delivery.estimatedAt.getTime(), after1.delivery.estimatedAt.getTime());
+  const logs = await db.auditLog.findMany({ where: { entityId: id, action: { startsWith: 'delivery.' } }, orderBy: { createdAt: 'asc' } });
+  assert.deepEqual(logs.map((l) => [l.action, l.actorId]), [['delivery.dispatch', sari.id], ['delivery.driver_update', sari.id]]);
+
+  // Tiba
+  const done = await call('POST', `/orders/${id}/delivered`, null, ses);
+  assert.equal(done.status, 200, JSON.stringify(done.body));
+  assert.equal(done.body.fulfillment, 'COMPLETED');
+  const pub = await call('GET', `/public/orders/${id}?token=${encodeURIComponent(delivToken)}`);
+  assert.equal(pub.body.stage, 'completed');
+  assert.equal(pub.body.delivery.status, 'DELIVERED');
+  assert.equal((await call('POST', `/orders/${id}/delivered`, null, ses)).status, 200, 'diulang: tetap selesai');
+  assert.equal((await call('POST', `/orders/${id}/dispatch`, driver, ses)).status, 409, 'sudah selesai');
+});
+
+test('delivery: belum dibayar tidak bisa diberangkatkan; pelanggan menandai diterima → pengantaran tercatat tiba', { skip }, async () => {
+  const dev = { 'x-device-token': device };
+  const ses = { ...dev, 'x-session': (await call('POST', '/pos/login', { userId: sari.id, pin: '3333' }, dev)).body.session };
+  const t = await login(15, 'Wulan');
+  const r = await call('POST', '/public/orders', {
+    branchCode: 'IJN', type: 'DELIVERY', name: 'Wulan', phone: phone(15), payment: 'qris', items: [fries()],
+    delivery: { courierCode: 'gosend', addressText: 'Jl. Soekarno Hatta No. 27, Jatimulyo, Malang', lat: -7.9420837, lng: 112.6220393 },
+  }, { 'x-customer-token': t });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  const o = r.body.order;
+  const unpaid = await call('POST', `/orders/${o.id}/dispatch`, { driverName: 'Andi' }, ses);
+  assert.equal(unpaid.status, 409);
+  assert.match(unpaid.body.message, /belum dibayar/);
+  const f = (await call('GET', '/pos/feed', null, dev)).body.orders.find((x) => x.id === o.id);
+  const now = new Date().toISOString();
+  const paid = await call('POST', '/pos/sync', { orders: [{
+    id: f.id, number: f.number, queueNumber: f.queueNumber, type: f.type, status: 'PAID', createdAt: f.createdAt, paidAt: now,
+    cashierId: sari.id, shiftId: shift, version: f.version + 1,
+    items: f.items.map((i) => ({ id: i.id, productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, optionIds: [], sentToKitchenAt: now })),
+    payments: [{ id: randomUUID(), optionCode: 'qris', amount: f.total, at: now }],
+  }] }, dev);
+  assert.equal(paid.body.orders[0].status, 'saved', JSON.stringify(paid.body));
+  await call('POST', '/pos/sync', { kitchen: [{ orderId: o.id, done: true, at: now }] }, dev);
+  const recv = await call('POST', `/public/orders/${o.id}/received?token=${encodeURIComponent(r.body.accessToken)}`);
+  assert.equal(recv.body.stage, 'completed');
+  const d = await db.delivery.findUnique({ where: { orderId: o.id } });
+  assert.equal(d.status, 'DELIVERED');
+  assert.ok(d.deliveredAt);
 });
 
 test('alamat tersimpan: tambah, ubah default, hapus; milik pelanggan lain tidak bisa diubah', { skip }, async () => {

@@ -48,10 +48,11 @@ node apps/pwa/scripts/serve.mjs 3001   # coba hasil build secara lokal
 ```
 
 - **Pembayaran jujur.** Prototipe lama menandai pesanan lunas saat pelanggan menekan "Saya sudah bayar". Sekarang pesanan QRIS menunggu kasir mengonfirmasi pembayaran di kasir, lalu status di aplikasi berubah sendiri. Gambar QRIS statis per cabang diunggah di Kantor → Cabang; tanpa gambar, pelanggan meminta QRIS lewat WhatsApp atau memilih bayar di kasir.
+- **Delivery.** Kurir dipesan kasir lewat aplikasi GoSend / GrabExpress (belum ada integrasi API). Alamat, penerima, dan tautan Google Maps tampil di kasir (Riwayat → Delivery; lencana di menu Riwayat menghitung delivery yang belum berangkat). Saat driver mengambil pesanan, kasir menekan **Driver berangkat** lalu mengisi nama, plat, nomor, perkiraan tiba, dan tautan lacak dari aplikasi kurir; pelanggan langsung melihat "Sedang diantar" beserta data driver. Pesanan selesai saat pelanggan menandai diterima atau kasir menekan **Pesanan tiba**.
 - **Login WhatsApp** memakai kode 6 digit yang dikirim gateway WhatsApp (`OTP_WEBHOOK_URL`). Tanpa gateway, di produksi login dimatikan dan pelanggan tetap bisa memesan sebagai tamu.
 - **Offline.** Service worker menyimpan halaman tab dan skripnya, jadi aplikasi tetap terbuka saat sinyal hilang (menu dari data terakhir). Pesanan, pembayaran, dan status tidak pernah diambil dari cache.
 - **Tautan lama** prototipe (`#/menu`, `#/status/…`, dll.) dialihkan ke halaman barunya.
-- Uji browser menyeluruh (aplikasi pelanggan + kasir, 11 alur): lihat cara menjalankannya di kepala [apps/pwa/e2e/pwa-e2e.cjs](apps/pwa/e2e/pwa-e2e.cjs). Tangkapan layarnya ada di `apps/pwa/docs/screenshots/`.
+- Uji browser menyeluruh (aplikasi pelanggan + kasir, 12 alur): lihat cara menjalankannya di kepala [apps/pwa/e2e/pwa-e2e.cjs](apps/pwa/e2e/pwa-e2e.cjs). Tangkapan layarnya ada di `apps/pwa/docs/screenshots/`.
 
 ### Pengaturan (environment)
 

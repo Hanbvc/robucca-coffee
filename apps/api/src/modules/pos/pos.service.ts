@@ -23,6 +23,7 @@ export const ORDER_FEED_SELECT = {
   createdAt: true, paidAt: true, readyAt: true, completedAt: true, updatedAt: true, voidedAt: true, voidReason: true, version: true,
   businessDate: true,
   items: {
+    orderBy: { id: 'asc' },
     select: {
       id: true, productId: true, productName: true, quantity: true, unitPrice: true, discountAmount: true, lineTotal: true, note: true,
       station: true, kitchenStatus: true, sentToKitchenAt: true, kitchenDoneAt: true, voidedAt: true, voidReason: true, promotionId: true,
@@ -33,7 +34,13 @@ export const ORDER_FEED_SELECT = {
   // metode pilihan pelanggan tertulis di catatan pesanan ("Bayar QRIS — menunggu konfirmasi kasir").
   payments: { where: { status: 'SUCCEEDED' }, select: { id: true, method: true, provider: true, amount: true, tenderedAmount: true, changeAmount: true, reference: true, paidAt: true, paymentOptionId: true } },
   refund: { select: { amount: true, reason: true, createdAt: true } },
-  delivery: { select: { status: true, recipientName: true, addressText: true, fee: true, driverName: true, vehiclePlate: true } },
+  delivery: {
+    select: {
+      status: true, recipientName: true, recipientPhone: true, addressText: true, addressNote: true, latitude: true, longitude: true, distanceKm: true, fee: true,
+      driverName: true, driverPhone: true, vehiclePlate: true, trackingUrl: true, estimatedAt: true, pickedUpAt: true, deliveredAt: true,
+      courier: { select: { name: true } },
+    },
+  },
 } satisfies Prisma.OrderSelect;
 
 @Injectable()
@@ -182,12 +189,15 @@ export class PosService {
       where: { orderId: k.orderId, ...(k.itemId ? { id: k.itemId } : {}) },
       data: { kitchenStatus: k.done ? 'DONE' : 'QUEUED', kitchenDoneAt: k.done ? at : null },
     });
-    // Semua item selesai → pesanan siap diambil (layar antrean & status PWA).
+    // Semua item selesai → pesanan siap diambil (layar antrean & status PWA). Pesanan yang sudah diantar driver, selesai,
+    // atau batal tidak mundur lagi bila item dibuka ulang / ditandai belakangan di layar dapur.
     const open = await this.prisma.db.orderItem.count({ where: { orderId: k.orderId, voidedAt: null, kitchenStatus: 'QUEUED', station: { not: 'NONE' } } });
-    await this.prisma.db.order.update({
-      where: { id: k.orderId },
+    const moved = await this.prisma.db.order.updateMany({
+      where: { id: k.orderId, fulfillment: { in: ['RECEIVED', 'PREPARING', 'READY'] } },
       data: open === 0 ? { fulfillment: 'READY', readyAt: at } : { fulfillment: 'PREPARING', readyAt: null },
     });
+    // Status dapur per item tetap sampai ke perangkat lain lewat feed (kursornya updatedAt pesanan).
+    if (!moved.count) await this.prisma.db.order.update({ where: { id: k.orderId }, data: { updatedAt: new Date() } });
     this.events.emit({ branchId: order.branchId, type: 'order', data: { id: k.orderId } });
     return { id: k.orderId, status: 'saved' };
   }

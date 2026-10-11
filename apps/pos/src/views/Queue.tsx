@@ -24,8 +24,8 @@ export function QueueView() {
     const p: { o: Order; at: number }[] = [];
     const r: { o: Order; at: number }[] = [];
     for (const o of orders) {
-      // pesanan yang sudah diambil pelanggan tidak ditampilkan lagi
-      if (o.fulfillment === 'COMPLETED' && o.source === 'PWA') continue;
+      // pesanan yang sudah diambil pelanggan / dibawa driver delivery tidak ditampilkan lagi
+      if ((o.fulfillment === 'COMPLETED' && o.source === 'PWA') || o.fulfillment === 'OUT_FOR_DELIVERY') continue;
       const k = kitchenState(o, marks);
       if (!k.sent) continue;
       if (k.ready) {
