@@ -15,7 +15,7 @@ const URL_ = target?.url;
 const here = path.dirname(fileURLToPath(import.meta.url));
 const api = path.resolve(here, '..');
 const dbPkg = path.resolve(here, '../../../packages/db');
-const PORT = 3250 + Math.floor(Math.random() * 50);
+const PORT = 3340 + Math.floor(Math.random() * 50); // terpisah dari rentang port tes lain (berjalan paralel)
 const base = `http://127.0.0.1:${PORT}`;
 const env = { ...process.env, NODE_ENV: 'test', DATABASE_URL: URL_, AUTH_SECRET: 'tes-rahasia-yang-panjangnya-lebih-dari-32-karakter', PORT: String(PORT), PUBLIC_ORDER_IP_LIMIT: '200', PUBLIC_OTP_IP_LIMIT: '200', PUBLIC_RSV_IP_LIMIT: '200' };
 
@@ -35,24 +35,30 @@ before(async () => {
   await ensureDb(target);
   execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], { cwd: dbPkg, env, stdio: 'ignore' });
   execFileSync('node', ['dist/seed/index.js'], { cwd: dbPkg, env: { ...env, SEED_DEMO: '1' }, stdio: 'ignore' });
-  const out = execFileSync('node', ['dist/cli/pair.js', '--branch', 'IJN', '--terminal', String(10 + Math.floor(Math.random() * 80)), '--name', 'Kasir tes PWA'], { cwd: api, env }).toString();
-  const code = out.match(/(\d{6})/)[1];
-  server = spawn('node', ['dist/main.js'], { cwd: api, env, stdio: 'ignore' });
-  for (let i = 0; i < 50; i++) {
-    try { if ((await fetch(base + '/health')).ok) break; } catch { /* belum siap */ }
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  device = (await call('POST', '/pos/pair', { code, name: 'Kasir tes PWA' })).body.token;
   const { createPrismaClient } = await import('@robucca/db');
   db = createPrismaClient(URL_);
+  // Satu shift OPEN per terminal: tutup sisa shift dari jalannya tes sebelumnya di terminal ini.
+  const terminal = 10 + Math.floor(Math.random() * 80);
+  await db.shift.updateMany({ where: { status: 'OPEN', device: { terminalNo: terminal, branch: { code: 'IJN' } } }, data: { status: 'CLOSED', closedAt: new Date(), countedCash: 0 } });
+  const out = execFileSync('node', ['dist/cli/pair.js', '--branch', 'IJN', '--terminal', String(terminal), '--name', 'Kasir tes PWA'], { cwd: api, env }).toString();
+  const code = out.match(/(\d{6})/)[1];
+  server = spawn('node', ['dist/main.js'], { cwd: api, env, stdio: 'ignore' });
+  let up = false;
+  for (let i = 0; i < 150 && !up; i++) {
+    try { up = (await fetch(base + '/health')).ok; } catch { /* belum siap */ }
+    if (!up) await new Promise((r) => setTimeout(r, 200));
+  }
+  if (!up) throw new Error('API tes tidak menyala dalam 30 detik');
+  device = (await call('POST', '/pos/pair', { code, name: 'Kasir tes PWA' })).body.token;
   menu = (await call('GET', '/public/branches/IJN/menu')).body;
   sari = await db.user.findFirst({ where: { name: 'Sari' } });
   shift = randomUUID();
-  await call('POST', '/pos/sync', { shifts: [{ id: shift, status: 'OPEN', openedAt: new Date().toISOString(), openingCash: 100000, openedById: sari.id }] }, { 'x-device-token': device });
+  const opened = await call('POST', '/pos/sync', { shifts: [{ id: shift, status: 'OPEN', openedAt: new Date().toISOString(), openingCash: 100000, openedById: sari.id }] }, { 'x-device-token': device });
+  assert.equal(opened.body.shifts[0].status, 'saved', JSON.stringify(opened.body));
 });
 
 after(async () => {
-  server?.kill();
+  server?.kill('SIGKILL'); // sudah berhenti di tes terakhir; SIGKILL bila tes itu dilewati/gagal (jangan sampai menggantung)
   await db?.$disconnect();
 });
 
@@ -249,8 +255,7 @@ test('QRIS: pesanan tetap menunggu konfirmasi kasir; muncul di feed POS seketika
   assert.equal(qris.payment.state, 'pending');
   assert.equal(qris.payment.code, 'qris');
   assert.equal(qris.items[0].imageUrl, 'assets/img/caffe-latte-hot.jpg', 'foto mengikuti opsi Hot');
-  const events = await Promise.race([got, new Promise((_, rej) => setTimeout(() => rej(new Error('SSE POS tidak menerima event')), 3000))]);
-  ctrl.abort();
+  const events = await Promise.race([got, new Promise((_, rej) => setTimeout(() => rej(new Error('SSE POS tidak menerima event')), 5000))]).finally(() => ctrl.abort());
   assert.match(events, /event: order/);
   // Kirim ulang dengan ID sama tidak dobel
   const again = await call('POST', '/public/orders', {
@@ -300,8 +305,7 @@ test('kasir mengonfirmasi pembayaran lewat /pos/sync (ID sama, versi naik) → s
   };
   const r = await call('POST', '/pos/sync', { orders: [doc] }, { 'x-device-token': device });
   assert.equal(r.body.orders[0].status, 'saved', JSON.stringify(r.body));
-  await Promise.race([got, new Promise((_, rej) => setTimeout(() => rej(new Error('status SSE tidak berubah')), 3000))]);
-  ctrl.abort();
+  await Promise.race([got, new Promise((_, rej) => setTimeout(() => rej(new Error('status SSE tidak berubah')), 5000))]).finally(() => ctrl.abort());
   assert.equal(statuses[0].stage, 'awaiting_payment');
   assert.equal(statuses.at(-1).stage, 'received');
   assert.equal(statuses.at(-1).payment.state, 'paid');
@@ -516,4 +520,25 @@ test('rate limit pesanan: per nomor dibatasi (429)', { skip }, async () => {
   }
   assert.ok(statuses.slice(0, 10).every((s) => s === 400), statuses.join());
   assert.equal(statuses[10], 429);
+});
+
+// Harus tes terakhir: mematikan server tes.
+test('API dimatikan (SIGTERM) saat ada stream SSE terbuka: stream diakhiri dan server berhenti, tidak menggantung', { skip }, async () => {
+  const pos = await fetch(`${base}/pos/stream?device=${encodeURIComponent(device)}`);
+  const cust = await fetch(`${base}/public/orders/${qris.id}/stream?token=${encodeURIComponent(qrisToken)}`);
+  assert.equal(pos.status, 200);
+  assert.equal(cust.status, 200);
+  const readers = [pos.body.getReader(), cust.body.getReader()];
+  await readers[1].read(); // status pertama sudah terkirim
+  const exited = new Promise((r) => server.once('exit', r));
+  server.kill('SIGTERM');
+  const drained = readers.map(async (rd) => { for (;;) if ((await rd.read()).done) return; });
+  let timer;
+  await Promise.race([
+    Promise.all([...drained, exited]),
+    new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('server tidak berhenti selama stream SSE terbuka')), 10_000); }),
+  ]).finally(() => {
+    clearTimeout(timer);
+    for (const rd of readers) rd.cancel().catch(() => {});
+  });
 });
