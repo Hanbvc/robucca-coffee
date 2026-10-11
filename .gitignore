@@ -17,3 +17,7 @@ next-env.d.ts
 !.env.example
 packages/db/src/generated/
 .test-dist/
+
+# aplikasi pelanggan: salinan aset bersama & hasil ekspor statis
+apps/pwa/public/assets/
+apps/pwa/out/

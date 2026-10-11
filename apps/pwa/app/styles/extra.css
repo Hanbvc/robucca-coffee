@@ -1,0 +1,44 @@
+/* Tambahan untuk aplikasi Next.js (fitur yang tidak ada di prototipe). Kelas & variabel mengikuti pwa.css. */
+
+/* Splash cukup sekali per sesi (skrip di <head> memasang html.no-splash). */
+html.no-splash .splash { display: none; }
+
+/* Tautan-tombol kecil di dalam teks */
+.text-btn { display: inline; padding: 0; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; color: inherit; }
+
+/* Pembayaran: gambar QRIS statis cabang */
+.qris-img { display: block; width: min(100%, 260px); margin: 14px auto 0; border-radius: 16px; background: #fff; box-shadow: var(--shadow); }
+.pay-amt { margin-top: 14px; }
+.pay-amt small { display: block; }
+.pay-amt b { display: block; font-size: 26px; font-weight: 700; letter-spacing: -.01em; }
+.pay-wait { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 14px 0 0; font-size: 12.5px; color: var(--ink-2); }
+.pay-wait .spinner { width: 16px; height: 16px; margin: 0; border-width: 2px; }
+
+/* OTP */
+.otp-input { letter-spacing: .5em; text-align: center; font-size: 22px; font-weight: 600; }
+.otp-dev { margin-top: 10px; font-size: 12px; color: var(--ink-3); text-align: center; }
+
+/* Alamat tersimpan & cabang di lembar */
+.saved-addr { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 11px 0; border-bottom: 1px solid var(--line); text-align: left; }
+.saved-addr:last-child { border-bottom: 0; }
+.saved-addr b { display: block; font-size: 13.5px; font-weight: 600; }
+.saved-addr small { display: block; font-size: 12px; color: var(--ink-3); line-height: 1.35; }
+
+/* Pesan galat saat data server gagal dimuat */
+.load-err { margin: 18px 16px 0; }
+.load-err .btn { margin-top: 10px; }
+.card .load-err { margin: 10px 0 0; }
+.load-err > span { display: block; font-size: 13px; color: var(--ink-2); }
+
+/* Menu sedang habis */
+.item.out .im, .sig.out .im { filter: grayscale(.7); opacity: .7; }
+.item .sold, .sig .sold { font-size: 12px; font-weight: 600; color: var(--danger); }
+.ci .warn-t { display: block; font-size: 11.5px; font-weight: 600; color: var(--danger); }
+
+/* Menu memuat (kerangka) */
+.skel { border-radius: 14px; background: linear-gradient(90deg, var(--sand), var(--bg-2), var(--sand)); background-size: 200% 100%; animation: skel 1.2s linear infinite; }
+@keyframes skel { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.sig .sold { position: absolute; top: 142px; right: 8px; padding: 4px 9px; border-radius: 999px; background: #fff; color: var(--danger); font-size: 11.5px; }
+
+/* Reservasi: cabang tujuan di atas foto (bisa diganti) */
+.rsv-hero .rh-branch { display: inline-flex; align-items: center; gap: 6px; height: 32px; margin-top: 12px; padding: 0 12px; border-radius: 999px; background: rgba(255,255,255,.18); color: #fff; font-size: 12.5px; font-weight: 600; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }

@@ -1,0 +1,7 @@
+/* Aplikasi pelanggan: Tailwind (tema & utilitas, tanpa preflight agar tidak bentrok dengan CSS prototipe),
+   lalu CSS prototipe lama apa adanya (css/style.css), lalu tambahan untuk fitur baru. */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+@import '../styles/pwa.css';
+@import '../styles/extra.css';

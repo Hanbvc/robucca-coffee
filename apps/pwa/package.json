@@ -2,15 +2,17 @@
   "name": "@robucca/pwa",
   "version": "0.0.0",
   "private": true,
-  "description": "Aplikasi pelanggan (Next.js App Router): menu, Click & Collect, status pesanan, loyalty.",
+  "description": "Aplikasi pelanggan (Next.js App Router, ekspor statis): menu, Pick Up / Delivery, status pesanan, reservasi meja, akun WhatsApp, menu baca-saja.",
   "type": "module",
   "scripts": {
-    "dev": "next dev --port 3001",
-    "build": "next build",
-    "start": "next start --port 3001",
-    "typecheck": "tsc --noEmit"
+    "assets": "node scripts/sync-assets.mjs",
+    "dev": "node scripts/sync-assets.mjs && next dev --port 3001",
+    "build": "node scripts/sync-assets.mjs && next build",
+    "start": "node scripts/serve.mjs",
+    "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
+    "@robucca/core": "workspace:*",
     "next": "16.3.8",
     "react": "19.2.8",
     "react-dom": "19.2.8"

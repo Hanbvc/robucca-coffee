@@ -212,7 +212,7 @@ function customerMenu(code: string | undefined): void {
   if (!code) return;
   const pwa = (import.meta.env.VITE_PWA_URL as string | undefined)?.trim();
   const api = S.be.api?.url ?? '';
-  const link = pwa ? `${pwa.replace(/\/+$/, '')}/?cabang=${encodeURIComponent(code)}` : `${api}/branches/${encodeURIComponent(code)}/menu`;
+  const link = pwa ? `${pwa.replace(/\/+$/, '')}/daftar-menu/?cabang=${encodeURIComponent(code)}` : `${api}/branches/${encodeURIComponent(code)}/menu`;
   void openLayer((close) => (
     <Modal
       title={`Menu pelanggan · ${code}`}
